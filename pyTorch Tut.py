@@ -4,6 +4,8 @@ from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision.transforms import ToTensor, Lambda, Compose
 import matplotlib.pyplot as plt
+import time
+import torch.nn.functional as F
 
 #Train data
 train_data = datasets.FashionMNIST(
@@ -50,10 +52,14 @@ class NerualNetwork(nn.Module):
             nn.Linear(512, 10)
         )
 
+
     def forward(self, x):
         x = self.flatten(x)
         logits = self.linear_relu_stack(x)
         return logits
+
+
+
 
 #Send the job
 model = NerualNetwork().to(device)
@@ -111,3 +117,33 @@ for t in range(epochs):
     test(train_dataloader, model, loss_fn)
 
 print("All Done. Thank you!")
+
+
+#Save model
+model_name = f'model_{time.localtime(time.time())}.pth'
+torch.save(model.state_dict(), model_name)
+print(f'Saved PyTorch Model State to {model_name}')
+
+#Load model
+model = NerualNetwork()
+model.load_state_dict(torch.load(model_name))
+
+classes = [
+    "T-shirt/top",
+    "Trouser",
+    "Pullover",
+    "Dress",
+    "Coat",
+    "Sandal",
+    "Shirt",
+    "Sneaker",
+    "Bag",
+    "Ankle boot",
+]
+
+model.eval()
+x, y = test_data[0][0], test_data[0][1] #Get the index
+with torch.no_grad():
+    pred = model(x)
+    predicted, actual = classes[pred[0].argmax(0)], classes[y]
+    print(f'Predicted: "{predicted}", Actual: "{actual}"')
