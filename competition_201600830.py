@@ -8,7 +8,8 @@
 ###
 ### The score is based on both algorithms.
 ######################################################################
-
+import copy
+import os
 
 import numpy as np
 import pandas as pd
@@ -22,9 +23,15 @@ from torchvision import transforms
 from torch.autograd import Variable
 import argparse
 import time
+# from ray import tune
+# from ray.tune import CLIReporter
+# from ray.tune.shcedulers import ASHAScheduler
+# from functools import partial
 
 #input id
 id_ = 201600830
+epsilon = 0.3
+alpha = 0.00784
 
 #setup training parameters
 parser = argparse.ArgumentParser(description='PyTorch MNIST Training')
@@ -87,18 +94,42 @@ class Net(nn.Module):
 #############    end of "don't change the below code"
 ######################################################################
 
-## 2021/10/5 version: FGSM_Attack
-def fgsm_attack(model, X, epsilon, device):
-    X_adv = Variable(X.data)
-    sign_grad = X_adv.grad.sign()
-    X_adv +=  epsilon*sign_grad
+## 2021/10/19 version: FGSM_Attack
+def fgsm_attack(X, epsilon, data_grad): # correct idea but without steps and step size
+    sign_grad = data_grad.sign()
+    X_adv = X
+    X_adv += epsilon*sign_grad
     X_adv = torch.clamp(X_adv, 0, 1)
     return X_adv
+
+## 2021/10/9 version: LinfPGD attack
+class LinPGDAttack(object):
+    def __init__(self, model):
+        self.model = model
+
+    def perturb(self, x_natural, y):  # **
+        x = x_natural.detach()
+        x += torch.zeros_like(x).uniform_(-epsilon, epsilon)
+        for i in range(7):
+            x.requires_grad = True
+            with torch.enable_grad():
+                logits = self.model(x)
+                loss = F.cross_entropy(logits, y)
+            grad = torch.autograd.grad(loss, [x])[0]
+            x = x.detach() + alpha * torch.sign(grad.detach())
+            x = torch.min(torch.max(x, x_natural - epsilon), x_natural+epsilon)
+            x = torch.clamp(x,0,1)
+        return x
+
+def linPGDAttack(x, y, model, adversary):
+    adv = adversary.perturb(x, y)
+    return adv
+
 
 
 'generate adversarial data, you can define your adversarial method'
 def adv_attack(model, X, y, device):
-    X_adv = Variable(X.data)
+    X_adv = Variable(X.data, requires_grad=True)
 
 #####################################################################
     ## Note: below is the place you need to edit to implement your own attack algorithm
@@ -115,22 +146,37 @@ def adv_attack(model, X, y, device):
 'train function, you can use adversarial training'
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
+    correct = 0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         data = data.view(data.size(0), 28*28)
 
         #use adverserial data to train the defense model
         adv_data = adv_attack(model, data, target, device=device)
-
+        # adv_data_grad = adv_data.data
+        # adv_data = fgsm_attack(data,epsilon, adv_data_grad)
+        adv_data = linPGDAttack(data, target, model, LinPGDAttack(model)) # adv train 2  USE SHELF LIB MTHS TO TEST ROBUSTNESS
         #clear gradients
         optimizer.zero_grad()
 
         #compute loss
-        loss = F.cross_entropy(model(adv_data), target)
+        loss = F.cross_entropy(model(adv_data), target) # adv train 0 feed adv_x in net training to shape a resilient net
+        output = model(data)
+        pred = output.max(1, keepdim=True)[1]
+        correct += pred.eq(target.view_as(pred)).sum().item()
 
         #get gradients and update
         loss.backward()
+
+
         optimizer.step()
+
+        # with tune.checkpoint_dir(epoch) as checkpoint_dir:
+        #     path = os.path.join(checkpoint_dir, "checkpoint")
+        #     torch.save((Net.state_dict(), optimizer.state_dict()), path)
+        #
+        #
+        # tune.report(loss=(loss / len(train_loader.dataset)), accuracy=correct / len(train_loader.dataset))
 
 'predict function'
 def eval_test(model, device, test_loader):
@@ -176,11 +222,13 @@ def train_model():
     ## Note: below is the place you need to edit to implement your own training algorithm
     ##       You can also edit the functions such as train(...).
 ################################################################################################
-    optimizer = optim.SGD(model.parameters(), lr=args.lr)
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9,
+                          weight_decay=0.0002) #adv train 1
     for epoch in range(1, args.epochs+1):
         start_time = time.time()
 
         #training
+        adjust_learning_rate(optimizer, epoch)
         train(args, model, device, train_loader, optimizer, epoch)
 
         # get trnloss and testloss
@@ -200,6 +248,16 @@ def train_model():
     torch.save(model.state_dict(), str(id_) + '.pt')
     return model
 
+#hyper-para tune [adv train 0]
+def adjust_learning_rate(optimizer, epoch):
+    lr = args.lr
+    if epoch >= 100:
+        lr /= 10
+    if epoch >= 150:
+        lr /= 10
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
 
 'compute perturbation distance'
 def p_distance(model, train_loader, device):
@@ -216,11 +274,48 @@ def p_distance(model, train_loader, device):
 ## Note: below is for testing/debugging purpose, please comment them out in the submission file
 ################################################################################################
 
+# Ray hyper-para tuning works only in linux   TRY ON SERVER
+# num_samples=10
+# max_num_epochs=10
+# config = {
+#     "l1": tune.sample_from(lambda _: 2**np.random.randint(2, 9)),
+#     "l2": tune.sample_from(lambda _: 2**np.random.randint(2, 9)),
+#     "lr": tune.loguniform(1e-4, 1e-1),
+#     "batch_size": tune.choice([2, 4, 8, 16])
+# }
+# scheduler = ASHAScheduler(
+#         metric="loss",
+#         mode="min",
+#         max_t=max_num_epochs,
+#         grace_period=1,
+#         reduction_factor=2)
+# reporter = CLIReporter(
+# # parameter_columns=["l1", "l2", "lr", "batch_size"],
+# metric_columns=["loss", "accuracy", "training_iteration"])
+# result = tune.run(
+#         partial(train, train_loader),
+#         resources_per_trial={"cpu": 2},
+#         config=config,
+#         num_samples=num_samples,
+#         scheduler=scheduler,
+#         progress_reporter=reporter)
+#
+# best_trial = result.get_best_trial("loss", "min", "last")
+# print("Best trial config: {}".format(best_trial.config))
+# print("Best trial final validation loss: {}".format(
+#         best_trial.last_result["loss"]))
+# print("Best trial final validation accuracy: {}".format(
+#         best_trial.last_result["accuracy"]))
+#
+# best_trained_model = Net(best_trial.config["l1"], best_trial.config["l2"])
+
 'Comment out the following command when you do not want to re-train the model'
 'In that case, it will load a pre-trained model you saved in train_model()'
+print('Start time:', time.localtime(time.time()))
 model = train_model()
 
 'Call adv_attack() method on a pre-trained model'
 'the robustness of the model is evaluated against the infinite-norm distance measure'
 '!!! important: MAKE SURE the infinite-norm distance (epsilon p) less than 0.11 !!!'
 p_distance(model, train_loader, device)
+print('End time:', time.localtime(time.time()))

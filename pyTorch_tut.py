@@ -35,8 +35,8 @@ for X, y in test_dataloader:
     break
 
 #Set cpu for training
-device = 'cpu'
-
+device = 'cuda'
+print(torch.cuda.is_available())
 print('Using {} to train'.format(device))
 
 #Define model
