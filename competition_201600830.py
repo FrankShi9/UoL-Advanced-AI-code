@@ -277,10 +277,10 @@ def cascade_adv_train(args, model, device, train_loader, optimizer, epoch):
         data, target = data.to(device), target.to(device)
         data = data.view(data.size(0), 28 * 28)
 
-        # use adverserial data to train the defense model
+
         adv_data = adv_attack(model, data, target, device=device)
 
-        # clear gradients
+
         optimizer.zero_grad()
 
         loss = F.cross_entropy(model(adv_data), target)
