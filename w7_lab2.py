@@ -24,9 +24,9 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--model-dir', default='./model-mnist-cnn',
                     help='directory of model for saving checkpoint')
+
 parser.add_argument('--random', default=True,
                     help='random initialization for PGD')
-
 #FGSM: num-steps:1 step-size:0.031   PGD-20: num-steps:20 step-size:0.003
 parser.add_argument('--epsilon', default=0.031,
                     help='perturbation')
