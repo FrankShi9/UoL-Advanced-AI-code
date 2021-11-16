@@ -10,3 +10,13 @@
 #         print(ii)
 #         for jj in ii:
 #             print(m[jj])
+# ipython:
+# import torch
+#         a = torch.arange(9, dtype= torch.float) - 4
+#         b = a.reshape((3, 3))
+#         torch.norm(a)
+#         #tensor(7.7460)
+#         torch.norm(b)
+#         #tensor(7.7460)
+#         torch.norm(a, float('inf'))
+#         #tensor(4.)

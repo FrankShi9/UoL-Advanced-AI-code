@@ -35,7 +35,7 @@ from art.defences.trainer import adversarial_trainer
 
 # input id
 id_ = 201600830
-epsilon = 0.3
+epsilon = 0.09
 alpha = 0.00784
 
 # setup training parameters
@@ -115,10 +115,11 @@ class Net(nn.Module):
 ######################################################################
 
 ## 2021/10/19 version: FGSM_Attack
-def fgsm_attack(X, epsilon, data_grad):
-    sign_grad = data_grad.sign()
+def fgsm_attack(X, epsilon):
+    X = Variable(X.data, requires_grad=True)
+    sign_grad = X.sign()
     X_adv = X
-    X_adv += epsilon * sign_grad
+    X_adv = Variable(X_adv + (epsilon * sign_grad), requires_grad=True)
     X_adv = torch.clamp(X_adv, 0, 1)
     return X_adv
 
@@ -168,39 +169,41 @@ def pgd_whitebox(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, st
         eta = torch.clamp(X_pgd.data - X.data, -epsilon, epsilon)
         X_pgd = Variable(X.data + eta, requires_grad=True)
         X_pgd = Variable(torch.clamp(X_pgd, 0, 1.0), requires_grad=True)
-    # err_pgd = (model(X_pgd).data.max(1)[1] != y.data).sum()
-
-    # return err, err_pgd
+    # err_pgd = (model(X_pgd).data.max(1)[1] != y.data).sum()       # return err, err_pgd
     return X_pgd
 
 
 # C&W attack: sub-optimal for single un-composite attack
-def calc_cw(model, X, y, epsilon=args.epsilon):
+def calc_cw(model, X, epsilon=args.epsilon):
     noise = torch.FloatTensor(*X.shape).uniform_(-0.1, 0.1).to(device)
     c = 1e+01
     X_adv = Variable(X.data + noise)
-    cw = torch.norm(noise) + c * model(X_adv)
-    optimizer = optim.Adam(cw, lr=0.0001)
 
-    X_cw = Variable(X.data, requires_grad=True)
+
+
+
     for batch_idx, (data, target) in enumerate(train_loader):
+
         data, target = data.to(device), target.to(device)
 
+        # change here use marginal loss instead
+        loss = torch.norm(noise) + c * F.multilabel_margin_loss(model(X_adv), target)
+        optimizer = optim.Adam(noise, lr=0.0001)
+
         optimizer.zero_grad()
-        X_cw = Variable(X_cw.data + noise, requires_grad=True)
-        loss = F.cross_entropy(model(X_cw), target)
 
         loss.backward()
+
         optimizer.step()
 
-        eta = torch.clamp(X_cw.data - X.data, -epsilon, epsilon)
+        eta = torch.clamp(X_adv.data - X.data, -epsilon, epsilon)
         X_cw = Variable(X.data + eta, requires_grad=True)
         X_cw = Variable(torch.clamp(X_cw, 0, 1.0), requires_grad=True)
 
     return X_cw
 
 
-# natural attack: Rotation and Translation
+# natural attack: Rotation and Translation # ??
 
 
 'generate adversarial data, you can define your adversarial method'
@@ -215,9 +218,9 @@ def adv_attack(model, X, y, device):
 
     random_noise = torch.FloatTensor(*X_adv.shape).uniform_(-0.1, 0.1).to(device)
     X_adv = Variable(X_adv.data + random_noise)
-    # X_adv = fgsm_attack(X, epsilon, adv_data_grad)
+    X_adv = fgsm_attack(X, epsilon)
     # X_adv = linPGDAttack(X, y, model, LinPGDAttack(model))
-    X_adv = pgd_whitebox(model, X, y)
+    # X_adv = pgd_whitebox(model, X, y)
     return X_adv
 
 
@@ -239,8 +242,8 @@ def train(args, model, device, train_loader, optimizer, epoch):
         # clear gradients
         optimizer.zero_grad()
 
-        # loss = F.cross_entropy(model(data), target) # adv train 0 feed adv_x in net training to shape a resilient net
-        loss = F.cross_entropy(model(adv_data), target)
+        loss = F.cross_entropy(model(data), target)
+        # loss = F.cross_entropy(model(adv_data), target) # adv train 0 feed adv_x in net training to shape a resilient net
 
         ## ray tune prep
         # output = model(data)
@@ -273,21 +276,26 @@ def train(args, model, device, train_loader, optimizer, epoch):
 def cascade_adv_train(args, model, device, train_loader, optimizer, epoch):
     model.train()
     # correct = 0
+    ite = 0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         data = data.view(data.size(0), 28 * 28)
-
-
+        adjust_learning_rate_c(optimizer, ite)
         adv_data = adv_attack(model, data, target, device=device)
-
 
         optimizer.zero_grad()
 
         loss = F.cross_entropy(model(adv_data), target)
 
         loss.backward()
+
         optimizer.step()
 
+        ite += args.batch_size
+
+        if ite > 8000:
+            # early stopping
+            return
 
 'predict function'
 
@@ -339,10 +347,27 @@ def train_model():
     ##       You can also edit the functions such as train(...).
     ################################################################################################
 
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0002)  # adv train 1
-    optimizer = optim.Adam(model.parameters(), lr=0.0001)  # un-tested!!
+    # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0002)  # adv train 1
+    # optimizer = optim.Adam(model.parameters(), lr=0.0001)  # bad on fgsm feed adv train/ only for c&w solve
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0001)  # for cascade adv
     # train
+
+    for epoch in range(1, 3): # pre-train 2 epoch given cascade paper for MNIST
+        start_time = time.time()
+        # training
+        adjust_learning_rate(optimizer, epoch)
+        train(args, model, device, train_loader, optimizer, epoch)
+
+        # get trnloss and testloss
+        trnloss, trnacc = eval_test(model, device, train_loader)
+        advloss, advacc = eval_adv_test(model, device, train_loader)
+
+        # print trnloss and testloss
+        print('Pre-train Epoch ' + str(epoch) + ': ' + str(int(time.time() - start_time)) + 's', end=', ')
+        print('Pre-train trn_loss: {:.4f}, trn_acc: {:.2f}%'.format(trnloss, 100. * trnacc), end=', ')
+        print('Pre-train adv_loss: {:.4f}, adv_acc: {:.2f}%'.format(advloss, 100. * advacc))
+
+
 
     for epoch in range(1, args.epochs + 1):
         start_time = time.time()
@@ -370,20 +395,26 @@ def train_model():
 
 # hyper-para tune [adv train 0] use during final model train and encap on GPU server
 def adjust_learning_rate(optimizer, epoch):
-    # lr = args.lr
-    # if epoch >= 100:
-    #     lr /= 10
-    # if epoch >= 150:
-    #     lr /= 10
+    lr = args.lr
+    if epoch >= 100:
+        lr /= 10
+    if epoch >= 150:
+        lr /= 10
 
-    # cascade version
-    lr = 0.1
-    if epoch >= 4000:
-        lr /= 10
-    if epoch >= 6000:
-        lr /= 10
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
+
+
+def adjust_learning_rate_c(optimizer, ite):
+    lr = args.lr
+    if ite >= 4000:
+        lr /= 10
+    if ite >= 6000:
+        lr /= 10
+
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
 
 
 'compute perturbation distance'
@@ -395,7 +426,7 @@ def p_distance(model, train_loader, device):
         data, target = data.to(device), target.to(device)
         data = data.view(data.size(0), 28 * 28)
         adv_data = adv_attack(model, data, target, device=device)
-        p.append(torch.norm(data - adv_data, float('inf')))
+        p.append(torch.norm(data - adv_data, float('inf'))) # infinity norm
     print('epsilon p: ', max(p))
 
 

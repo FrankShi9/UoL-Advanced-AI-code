@@ -5,18 +5,21 @@ x_train = np.array([[0., 0.],
                     [1., 0.],
                     [1., 1.]])
 
-y_train = np.array(np.logical_and(x_train[:, 0] > 0.5, x_train[:, 1] > 0.5), dtype=int)
+y_train = np.array(np.logical_xor(x_train[:, 0] > 0.5, x_train[:, 1] > 0.5), dtype=int)
 
 from sklearn.linear_model import Perceptron
-clf = Perceptron(tol=1e-3, random_state=0)
-clf.fit(x_train, y_train, coef_init=np.array(
-    [
-        [1.5],
-        [1.5]
-    ]
-))
+from sklearn.neural_network import MLPClassifier
+clf = MLPClassifier(max_iter=10000, hidden_layer_sizes=(4, 2), random_state=1)
+# clf = Perceptron(tol=1e-3, random_state=0)
+# clf.fit(x_train, y_train, coef_init=np.array(
+#     [
+#         [1.5],
+#         [1.5]
+#     ]
+# ))
+clf.fit(x_train, y_train)
 
-print(clf.coef_)
+# print(clf.coef_)
 
 from mlxtend.plotting import plot_decision_regions
 plot_decision_regions(x_train, y_train, clf=clf, legend=2)
