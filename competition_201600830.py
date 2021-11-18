@@ -319,6 +319,9 @@ def eval_test(model, device, test_loader):
 
 
 def eval_adv_test(model, device, test_loader):
+    # extra robustness externel toolbox test
+    import foolbox as fb
+
     model.eval()
     test_loss = 0
     correct = 0
@@ -331,6 +334,14 @@ def eval_adv_test(model, device, test_loader):
             test_loss += F.cross_entropy(output, target, size_average=False).item()
             pred = output.max(1, keepdim=True)[1]
             correct += pred.eq(target.view_as(pred)).sum().item()
+
+            model = ...
+            fmodel = fb.PyTorchModel(model, bounds=(0, 1))
+
+            attack = fb.attacks.LinfinityBrendelBethgeAttack()
+            epsilons = [0.0, 0.001, 0.01, 0.03, 0.1]
+            _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
+            print('robustness: ', success)
     test_loss /= len(test_loader.dataset)
     test_accuracy = correct / len(test_loader.dataset)
     return test_loss, test_accuracy
@@ -477,3 +488,6 @@ model = train_model()
 'the robustness of the model is evaluated against the infinite-norm distance measure'
 '!!! important: MAKE SURE the infinite-norm distance (epsilon p) less than 0.11 !!!'
 p_distance(model, train_loader, device)
+
+
+
