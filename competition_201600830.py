@@ -178,16 +178,13 @@ def calc_cw(model, X, epsilon=args.epsilon):
     noise = torch.FloatTensor(*X.shape).uniform_(-0.1, 0.1).to(device)
     c = 1e+01
     X_adv = Variable(X.data + noise)
-
-
-
-
+    X_cw = X_adv
     for batch_idx, (data, target) in enumerate(train_loader):
 
         data, target = data.to(device), target.to(device)
 
         # change here use marginal loss instead
-        loss = torch.norm(noise) + c * F.multilabel_margin_loss(model(X_adv), target)
+        loss = torch.norm(noise, float('inf')) + c * F.multilabel_margin_loss(model(X_adv), target)
         optimizer = optim.Adam(noise, lr=0.0001)
 
         optimizer.zero_grad()
@@ -201,6 +198,25 @@ def calc_cw(model, X, epsilon=args.epsilon):
         X_cw = Variable(torch.clamp(X_cw, 0, 1.0), requires_grad=True)
 
     return X_cw
+
+# GT attack: sub-optimal better than c&w for single un-composite attack
+def calc_gt(model, X, X_ac, epsilon=args.epsilon):
+    eps_min = 0
+    eps_max = epsilon
+    t = 1e-4
+    x_b = X_ac
+    eps = 0.
+    x_h = None
+    while eps_max-eps_min > t:
+        eps = (eps_max+eps_min) / 2
+        # !!Invoke Reluplex to test whether ∃x!!
+        if x_h is not None:
+            eps_max =  torch.norm(x_h - X , float('inf'))
+            x_b = x_h
+        else:
+            eps_min = eps
+
+    return x_b
 
 
 # natural attack: Rotation and Translation # ??
@@ -297,9 +313,27 @@ def cascade_adv_train(args, model, device, train_loader, optimizer, epoch):
             # early stopping
             return
 
+
+# !!ATLD train by Huang!!
+def atld_train(args, model, device, train_loader, optimizer, epoch):
+    model.train()
+
+    for batch_idx, (data, target) in enumerate(train_loader):
+        data, target = data.to(device), target.to(device)
+        data = data.view(data.size(0), 28 * 28)
+
+        adv_data = adv_attack(model, data, target, device=device)
+
+        optimizer.zero_grad()
+
+        loss = F.cross_entropy(model(adv_data), target)
+
+        loss.backward()
+        optimizer.step()
+
+
+
 'predict function'
-
-
 def eval_test(model, device, test_loader):
     model.eval()
     test_loss = 0
