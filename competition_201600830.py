@@ -32,8 +32,13 @@ from art.defences.trainer import adversarial_trainer
 # from ray.tune import CLIReporter
 # from ray.tune.shcedulers import ASHAScheduler
 # from functools import partial
-
+from attack_methods_new_cifar10 import *
+from tqdm import tqdm
+from WideResnet import *
+from dis import *
 # input id
+
+
 id_ = 201600830
 epsilon = 0.09
 alpha = 0.00784
@@ -314,22 +319,102 @@ def cascade_adv_train(args, model, device, train_loader, optimizer, epoch):
             return
 
 
-# !!ATLD train by Huang!!
-def atld_train(args, model, device, train_loader, optimizer, epoch):
-    model.train()
+# ATLD train by Huang
+def atld_train(epoch, net):
+    # config for feature scatter
+    config_feature_scatter = {
+        'train': True,
+        'epsilon': 8.0 / 255 * 2,
+        'num_steps': 1,
+        'step_size': 8.0 / 255 * 2,
+        'random_start': True,
+        'ls_factor': 0.5,
+    }
+    basic_net = WideResNet(depth=28,
+                           num_classes=args.num_classes,
+                           widen_factor=10)
+    basic_net = basic_net.to(device)
+    discriminator = Discriminator_2(depth=28, num_classes=1, widen_factor=5).to(device)
+    D_optimizer = optim.SGD(discriminator.parameters(),
+                            lr=1e-3,
+                            momentum=args.momentum,
+                            weight_decay=args.weight_decay)
 
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-        data = data.view(data.size(0), 28 * 28)
 
-        adv_data = adv_attack(model, data, target, device=device)
+    net_org = Attack_FeaScatter(basic_net, config_feature_scatter, discriminator, D_optimizer)
+    optimizer = optim.SGD(net.parameters(),
+                          lr=args.lr,
+                          momentum=args.momentum,
+                          weight_decay=args.weight_decay)
+    print('\nEpoch: %d' % epoch)
+    net.train()
+
+    train_loss = 0
+    correct = 0
+    total = 0
+
+    # update learning rate
+    if epoch < args.decay_epoch1:
+        lr = args.lr
+    elif epoch < args.decay_epoch2:
+        lr = args.lr * args.decay_rate
+    else:
+        lr = args.lr * args.decay_rate * args.decay_rate
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+
+    def get_acc(outputs, targets):
+        _, predicted = outputs.max(1)
+        total = targets.size(0)
+        targets = targets.long()
+        correct = predicted.eq(targets).sum().item()
+        acc = 1.0 * correct / total
+        return acc
+
+    adversarial_criterion = nn.BCELoss()
+    iterator = tqdm(train_loader, ncols=0, leave=False)
+    for batch_idx, (inputs, targets) in enumerate(iterator):
+        start_time = time.time()
+        inputs, targets = inputs.to(device), targets.to(device)
+
+        adv_acc = 0
 
         optimizer.zero_grad()
 
-        loss = F.cross_entropy(model(adv_data), target)
+        # forward
+        outputs, loss_fs, gan_loss, scale = net_org(inputs.detach(), targets)
 
-        loss.backward()
+
+        optimizer.zero_grad()
+        loss = loss_fs.mean()
+        print('loss_fs:',loss_fs.item())
+        #print('gan_loss:', gan_loss.item())
+        loss = (loss + gan_loss * scale / 2)
+        loss.backward(retain_graph=True)
+        for name, parms in net.named_parameters():
+            if name == 'module.final_layer.weight':
+                max = torch.max(parms.grad)
+                min = torch.min(parms.grad)
+                diff = (max - min) * 0.3
+
+                max_threshold = max - diff
+                min_threshold = min + diff
+
+                parms.grad = parms.grad.clamp(min_threshold, max_threshold)
         optimizer.step()
+
+
+        train_loss = loss.item()
+
+        duration = time.time() - start_time
+        if batch_idx % args.log_step == 0:
+            if adv_acc == 0:
+                adv_acc = get_acc(outputs, targets)
+            iterator.set_description(str(adv_acc))
+
+            nat_outputs, _ = net_org(inputs, targets, attack=False)
+            nat_acc = get_acc(nat_outputs, targets)
+
 
 
 
@@ -391,6 +476,31 @@ def train_model():
     ## Note: below is the place you need to edit to implement your own training algorithm
     ##       You can also edit the functions such as train(...).
     ################################################################################################
+    config_feature_scatter = {
+        'train': True,
+        'epsilon': 8.0 / 255 * 2,
+        'num_steps': 1,
+        'step_size': 8.0 / 255 * 2,
+        'random_start': True,
+        'ls_factor': 0.5,
+    }
+    basic_net = WideResNet(depth=28,
+                           num_classes=args.num_classes,
+                           widen_factor=10)
+    basic_net = basic_net.to(device)
+    discriminator = Discriminator_2(depth=28, num_classes=1, widen_factor=5).to(device)
+    D_optimizer = optim.SGD(discriminator.parameters(),
+                            lr=1e-3,
+                            momentum=args.momentum,
+                            weight_decay=args.weight_decay)
+
+    net_org = Attack_FeaScatter(basic_net, config_feature_scatter, discriminator, D_optimizer)
+    # net_org = torch.nn.DataParallel(net_org)
+    net = net_org.basic_net
+    discriminator = net_org.discriminator
+    for epoch in range(1, 3):
+        atld_train(epoch, net)
+
 
     # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0002)  # adv train 1
     # optimizer = optim.Adam(model.parameters(), lr=0.0001)  # bad on fgsm feed adv train/ only for c&w solve
@@ -516,6 +626,7 @@ def p_distance(model, train_loader, device):
 
 'Comment out the following command when you do not want to re-train the model'
 'In that case, it will load a pre-trained model you saved in train_model()'
+
 model = train_model()
 
 'Call adv_attack() method on a pre-trained model'
