@@ -1,5 +1,3 @@
-'''Some utility functions
-'''
 import os
 import sys
 import time

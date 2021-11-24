@@ -1,19 +1,20 @@
 import numpy as np
+import math
+import pickle
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models import *
+
 from torch.autograd.gradcheck import zero_gradients
 from torch.autograd import Variable
 from torch import autograd
 import utils
-import math
 
 from utils import softCrossEntropy
 from utils import one_hot_tensor, label_smoothing
 import ot
-import pickle
 
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'

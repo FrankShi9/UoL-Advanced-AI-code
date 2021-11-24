@@ -32,10 +32,11 @@ from art.defences.trainer import adversarial_trainer
 # from ray.tune import CLIReporter
 # from ray.tune.shcedulers import ASHAScheduler
 # from functools import partial
+
 from attack_methods_new_cifar10 import *
 from tqdm import tqdm
 from WideResnet import *
-from dis import *
+from dis_atld import *
 # input id
 
 
@@ -242,12 +243,14 @@ def adv_attack(model, X, y, device):
     X_adv = fgsm_attack(X, epsilon)
     # X_adv = linPGDAttack(X, y, model, LinPGDAttack(model))
     # X_adv = pgd_whitebox(model, X, y)
-    return X_adv
+
 
 
 #####################################################################
 ## end of attack method
 ####################################################################
+    return X_adv
+
 
 'train function, you can use adversarial training'
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -331,21 +334,21 @@ def atld_train(epoch, net):
         'ls_factor': 0.5,
     }
     basic_net = WideResNet(depth=28,
-                           num_classes=args.num_classes,
+                           num_classes=10,
                            widen_factor=10)
     basic_net = basic_net.to(device)
     discriminator = Discriminator_2(depth=28, num_classes=1, widen_factor=5).to(device)
     D_optimizer = optim.SGD(discriminator.parameters(),
                             lr=1e-3,
-                            momentum=args.momentum,
-                            weight_decay=args.weight_decay)
+                            momentum=0.9,
+                            weight_decay=0.0001)
 
 
     net_org = Attack_FeaScatter(basic_net, config_feature_scatter, discriminator, D_optimizer)
     optimizer = optim.SGD(net.parameters(),
                           lr=args.lr,
-                          momentum=args.momentum,
-                          weight_decay=args.weight_decay)
+                          momentum=0.9,
+                          weight_decay=0.0001)
     print('\nEpoch: %d' % epoch)
     net.train()
 
@@ -354,12 +357,12 @@ def atld_train(epoch, net):
     total = 0
 
     # update learning rate
-    if epoch < args.decay_epoch1:
+    if epoch < 100:
         lr = args.lr
-    elif epoch < args.decay_epoch2:
-        lr = args.lr * args.decay_rate
+    elif epoch < 150:
+        lr = args.lr * 0.1
     else:
-        lr = args.lr * args.decay_rate * args.decay_rate
+        lr = args.lr * 0.1 * 0.1
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
@@ -485,14 +488,14 @@ def train_model():
         'ls_factor': 0.5,
     }
     basic_net = WideResNet(depth=28,
-                           num_classes=args.num_classes,
+                           num_classes=10,
                            widen_factor=10)
     basic_net = basic_net.to(device)
     discriminator = Discriminator_2(depth=28, num_classes=1, widen_factor=5).to(device)
     D_optimizer = optim.SGD(discriminator.parameters(),
                             lr=1e-3,
-                            momentum=args.momentum,
-                            weight_decay=args.weight_decay)
+                            momentum=0.9,
+                            weight_decay=0.0001)
 
     net_org = Attack_FeaScatter(basic_net, config_feature_scatter, discriminator, D_optimizer)
     # net_org = torch.nn.DataParallel(net_org)

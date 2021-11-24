@@ -1,7 +1,3 @@
-"""
-OT using IPOT and Sinkhorn algorithm
-"""
-
 import torch
 from torch.autograd import Variable
 import torch.nn as nn
@@ -9,7 +5,6 @@ import torch.nn.functional as F
 
 from utils import softCrossEntropy
 
-import numpy as np
 
 
 def sinkhorn_loss_joint_IPOT(alpha, beta, x_feature, y_feature, x_label,
