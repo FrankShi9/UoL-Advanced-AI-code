@@ -80,7 +80,7 @@ class WideResNet(nn.Module):
         n = (depth - 4) / 6
         block = BasicBlock
         # 1st conv before any network block
-        self.conv1 = nn.Conv2d(3,
+        self.conv1 = nn.Conv2d(1, #change
                                nChannels[0],
                                kernel_size=3,
                                stride=1,
@@ -118,7 +118,7 @@ class WideResNet(nn.Module):
         out = self.block3(out)
         out = self.relu(self.bn1(out))
         fea = out
-        out = F.avg_pool2d(out, 8)
+        out = F.avg_pool2d(out, 2) #change
         out = out.view(-1, self.nChannels)
 
         return self.fc(out), out.view(x.size(0), -1), fea

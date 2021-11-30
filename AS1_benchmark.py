@@ -33,7 +33,7 @@ parser.add_argument('--batch-size', type=int, default=128, metavar='N',
                     help='input batch size for training (default: 128)')
 parser.add_argument('--test-batch-size', type=int, default=128, metavar='N',
                     help='input batch size for testing (default: 128)')
-parser.add_argument('--epochs', type=int, default=10, metavar='N',
+parser.add_argument('--epochs', type=int, default=2, metavar='N',
                     help='number of epochs to train')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate')
@@ -88,6 +88,28 @@ class Net(nn.Module):
 ##############################################################################
 #############    end of "don't change the below code"   ######################
 ##############################################################################
+def pgd_whitebox(model, X, y, epsilon=0.031, num_steps=20, step_size=0.03):
+    out = model(X)
+    # err = (out.data.max(1)[1] != y.data).float().sum()
+    X_pgd = Variable(X.data, requires_grad=True)
+    if True:
+        random_noise = torch.FloatTensor(*X_pgd.shape).uniform_(-epsilon, epsilon).to(device)
+        X_pgd = Variable(X_pgd.data + random_noise, requires_grad=True)
+
+    for _ in range(num_steps):
+        opt = optim.SGD([X_pgd], lr=1e-3)
+        opt.zero_grad()
+
+        with torch.enable_grad():
+            loss = nn.CrossEntropyLoss()(model(X_pgd), y)
+        loss.backward()
+        eta = step_size * X_pgd.grad.data.sign()
+        X_pgd = Variable(X_pgd.data + eta, requires_grad=True)
+        eta = torch.clamp(X_pgd.data - X.data, -epsilon, epsilon)
+        X_pgd = Variable(X.data + eta, requires_grad=True)
+        X_pgd = Variable(torch.clamp(X_pgd, 0, 1.0), requires_grad=True)
+    # err_pgd = (model(X_pgd).data.max(1)[1] != y.data).sum()       # return err, err_pgd
+    return X_pgd
 
 def deepfool(image, net, num_classes=10, overshoot=0.02, max_iter=50):
     """
@@ -169,27 +191,83 @@ def deepfool(image, net, num_classes=10, overshoot=0.02, max_iter=50):
     return pert_image
     # return r_tot, loop_i, label, k_i, pert_image
 
+epsilon = 0.09
+def cw_l2_attack(model, X, y, targeted=False, c=1e-4, kappa=0, max_iter=20, learning_rate=0.01):
+    images = X.to(device)
+    labels = y.to(device)
+
+    # Define f-function
+    def f(x):
+
+        outputs = model(x)
+        one_hot_labels = torch.eye(len(outputs[0]))[labels].to(device)
+
+        i, _ = torch.max((1 - one_hot_labels) * outputs, dim=1)
+        j = torch.masked_select(outputs, one_hot_labels.byte())
+
+        # If targeted, optimize for making the other class most likely
+        if targeted:
+            return torch.clamp(i - j, min=-kappa)
+
+        # If untargeted, optimize for making the other class most likely
+        else:
+            return torch.clamp(j - i, min=-kappa)
+
+    w = torch.zeros_like(images, requires_grad=True).to(device)
+
+    optimizer = optim.Adam([w], lr=learning_rate)
+
+    prev = 1e10
+
+    for step in range(max_iter):
+
+        a = 1 / 2 * (nn.Tanh()(w) + 1)
+
+        loss1 = nn.MSELoss(reduction='sum')(a, images)
+        loss2 = torch.sum(c * f(a))
+
+        cost = loss1 + loss2
+        cost = Variable(cost.data, requires_grad=True)
+        optimizer.zero_grad()
+        cost.backward()
+        optimizer.step()
+
+        # Early Stop when loss does not converge.
+        if step % (max_iter // 10) == 0:
+            if cost > prev:
+                print('Attack Stopped due to CONVERGENCE....')
+                return a
+            prev = cost
+
+        print('- Learning Progress : %2.2f %%        ' % ((step + 1) / max_iter * 100), end='\r')
+
+    attack_images = 1 / 2 * (nn.Tanh()(w) + 1)
+    attack_images = Variable(torch.clamp(attack_images.data, -epsilon, epsilon), requires_grad=True)
+
+    return attack_images
 
 'generate adversarial data, you can define your adversarial method'
-
-
 def adv_attack(model, X, y, device):
-    for X, y in enumerate(train_loader):
-        X = deepfool(X, model, num_classes=10, overshoot=0.02, max_iter=50)
-    return X
-    # X_adv = Variable(X.data)
-
+    X_adv = Variable(X.data)
+    # print(X[12])
     ################################################################################################
     ## Note: below is the place you need to edit to implement your own attack algorithm
     ################################################################################################
-
+    #Randn noise
     # random_noise = torch.FloatTensor(*X_adv.shape).uniform_(-0.1, 0.1).to(device)
     # X_adv = Variable(X_adv.data + random_noise)
 
+    #CW
+    noise = cw_l2_attack(model, X, y)
+    X_adv = Variable(X_adv.data + noise)
+
+    #PGD
+    # X_adv = pgd_whitebox(model, X, y)
+    # X_adv = Variable(X_adv.data)
     ################################################################################################
     ## end of attack method
     ################################################################################################
-    # return X_adv
+    return X_adv
 
 
 'train function, you can use adversarial training'

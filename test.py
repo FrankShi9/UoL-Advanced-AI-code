@@ -11,7 +11,7 @@
 #         for jj in ii:
 #             print(m[jj])
 # ipython:
-# import torch
+import torch
 #         a = torch.arange(9, dtype= torch.float) - 4
 #         b = a.reshape((3, 3))
 #         torch.norm(a)
@@ -20,3 +20,8 @@
 #         #tensor(7.7460)
 #         torch.norm(a, float('inf'))
 #         #tensor(4.)
+
+# x = torch.randn(4, 4)
+# print(x)
+# y = x.view(16)
+# print(y)

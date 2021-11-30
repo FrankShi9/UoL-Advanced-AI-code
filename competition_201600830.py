@@ -52,7 +52,7 @@ parser.add_argument('--batch-size', type=int, default=128, metavar='N',
 parser.add_argument('--test-batch-size', type=int, default=128, metavar='N',
                     help='input batch size for testing (default: 128)')
 
-parser.add_argument('--epochs', type=int, default=10, metavar='N',
+parser.add_argument('--epochs', type=int, default=2, metavar='N',
                     help='number of epochs to train')
 # parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
 #                     help='learning rate')
@@ -182,7 +182,7 @@ def pgd_whitebox(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, st
 # CW-L2 Attack
 # Based on the paper, i.e. not exact same version of the code on https://github.com/carlini/nn_robust_attacks
 # (1) Binary search method for c, (2) Optimization on tanh space, (3) Choosing method best l2 adversaries is NOT IN THIS CODE.
-def cw_l2_attack(model, X, y, targeted=False, c=1e-4, kappa=0, max_iter=1000, learning_rate=0.01):
+def cw_l2_attack(model, X, y, targeted=False, c=1e-4, kappa=0, max_iter=20, learning_rate=0.01, epsilon=args.epsilon):
     images = X.to(device)
     labels = y.to(device)
 
@@ -217,7 +217,7 @@ def cw_l2_attack(model, X, y, targeted=False, c=1e-4, kappa=0, max_iter=1000, le
         loss2 = torch.sum(c * f(a))
 
         cost = loss1 + loss2
-
+        cost = Variable(cost.data, requires_grad=True)
         optimizer.zero_grad()
         cost.backward()
         optimizer.step()
@@ -232,6 +232,7 @@ def cw_l2_attack(model, X, y, targeted=False, c=1e-4, kappa=0, max_iter=1000, le
         print('- Learning Progress : %2.2f %%        ' % ((step + 1) / max_iter * 100), end='\r')
 
     attack_images = 1 / 2 * (nn.Tanh()(w) + 1)
+    attack_images = Variable(torch.clamp(attack_images, -epsilon, epsilon), requires_grad=True)
 
     return attack_images
 
@@ -247,8 +248,9 @@ def calc_cw(model, X, epsilon=args.epsilon):
         data, target = data.to(device), target.to(device)
 
         # change here use marginal loss instead
-        loss = torch.norm(noise, float('inf')) + c * F.multilabel_margin_loss(model(X_adv), target)
-        optimizer = optim.Adam(noise, lr=0.0001)
+        X_h = model(X_adv)
+        loss = torch.norm(noise, float('inf')) + c * F.cross_entropy(X_h, target)
+        optimizer = optim.Adam([noise], lr=0.0001)
 
         optimizer.zero_grad()
 
@@ -289,18 +291,28 @@ def calc_gt(model, X, X_ac, epsilon=args.epsilon):
 
 
 def adv_attack(model, X, y, device):
-    X_adv = Variable(X.data, requires_grad=True)
+    X_adv = Variable(X.data)
 
     #####################################################################
     ## Note: below is the place you need to edit to implement your own attack algorithm
     ####################################################################
+    # CW
+    noise = cw_l2_attack(model, X, y)
+    X_adv = Variable(X_adv.data + noise)
 
-    random_noise = torch.FloatTensor(*X_adv.shape).uniform_(-0.1, 0.1).to(device)
-    X_adv = Variable(X_adv.data + random_noise)
-    X_adv = fgsm_attack(X, epsilon)
+
+    #random noise
+    # random_noise = torch.FloatTensor(*X_adv.shape).uniform_(-0.1, 0.1).to(device)
+    # X_adv = Variable(X_adv.data + random_noise)
+
+
+    # X_adv = fgsm_attack(X, epsilon)
     # X_adv = linPGDAttack(X, y, model, LinPGDAttack(model))
     # X_adv = pgd_whitebox(model, X, y)
+    # X_adv = calc_cw(model, X)
 
+    #goes with the upper 4
+    X_adv = Variable(X_adv.data)
 
 
 #####################################################################
@@ -499,7 +511,7 @@ def eval_test(model, device, test_loader):
 
 def eval_adv_test(model, device, test_loader):
     # extra robustness externel toolbox test
-    import foolbox as fb
+    # import foolbox as fb
 
     model.eval()
     test_loss = 0
@@ -514,13 +526,13 @@ def eval_adv_test(model, device, test_loader):
             pred = output.max(1, keepdim=True)[1]
             correct += pred.eq(target.view_as(pred)).sum().item()
 
-            model = ...
-            fmodel = fb.PyTorchModel(model, bounds=(0, 1))
+            # model = ...
+            # fmodel = fb.PyTorchModel(model, bounds=(0, 1))
+            # attack = fb.attacks.LinfinityBrendelBethgeAttack()
+            # epsilons = [0.0, 0.001, 0.01, 0.03, 0.1]
+            # _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
+            # print('robustness: ', success)
 
-            attack = fb.attacks.LinfinityBrendelBethgeAttack()
-            epsilons = [0.0, 0.001, 0.01, 0.03, 0.1]
-            _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
-            print('robustness: ', success)
     test_loss /= len(test_loader.dataset)
     test_accuracy = correct / len(test_loader.dataset)
     return test_loss, test_accuracy
@@ -536,30 +548,32 @@ def train_model():
     ## Note: below is the place you need to edit to implement your own training algorithm
     ##       You can also edit the functions such as train(...).
     ################################################################################################
-    config_feature_scatter = {
-        'train': True,
-        'epsilon': 8.0 / 255 * 2,
-        'num_steps': 1,
-        'step_size': 8.0 / 255 * 2,
-        'random_start': True,
-        'ls_factor': 0.5,
-    }
-    basic_net = WideResNet(depth=28,
-                           num_classes=10,
-                           widen_factor=10)
-    basic_net = basic_net.to(device)
-    discriminator = Discriminator_2(depth=28, num_classes=1, widen_factor=5).to(device)
-    D_optimizer = optim.SGD(discriminator.parameters(),
-                            lr=1e-3,
-                            momentum=0.9,
-                            weight_decay=0.0001)
 
-    net_org = Attack_FeaScatter(basic_net, config_feature_scatter, discriminator, D_optimizer)
-    # net_org = torch.nn.DataParallel(net_org)
-    net = net_org.basic_net
-    discriminator = net_org.discriminator
-    for epoch in range(1, 3):
-        atld_train(epoch, net)
+    #  atld only
+    # config_feature_scatter = {
+    #     'train': True,
+    #     'epsilon': 8.0 / 255 * 2,
+    #     'num_steps': 1,
+    #     'step_size': 8.0 / 255 * 2,
+    #     'random_start': True,
+    #     'ls_factor': 0.5,
+    # }
+    # basic_net = WideResNet(depth=28,
+    #                        num_classes=10,
+    #                        widen_factor=10)
+    # basic_net = basic_net.to(device)
+    # discriminator = Discriminator_2(depth=28, num_classes=1, widen_factor=5).to(device)
+    # D_optimizer = optim.SGD(discriminator.parameters(),
+    #                         lr=1e-3,
+    #                         momentum=0.9,
+    #                         weight_decay=0.0001)
+    #
+    # net_org = Attack_FeaScatter(basic_net, config_feature_scatter, discriminator, D_optimizer)
+    # # net_org = torch.nn.DataParallel(net_org)
+    # net = net_org.basic_net
+    # discriminator = net_org.discriminator
+    # for epoch in range(1, 3):
+    #     atld_train(epoch, net)
 
 
     # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0002)  # adv train 1
@@ -567,22 +581,26 @@ def train_model():
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0001)  # for cascade adv
     # train
 
-    for epoch in range(1, 3): # pre-train 2 epoch given cascade paper for MNIST
-        start_time = time.time()
-        # training
-        adjust_learning_rate(optimizer, epoch)
-        train(args, model, device, train_loader, optimizer, epoch)
+    # for epoch in range(1, 3): # pre-train 2 epoch given cascade paper for MNIST
+    #     start_time = time.time()
+    #     # training
+    #     adjust_learning_rate(optimizer, epoch)
+    #     train(args, model, device, train_loader, optimizer, epoch)
+    #
+    #     # get trnloss and testloss
+    #     trnloss, trnacc = eval_test(model, device, train_loader)
+    #     advloss, advacc = eval_adv_test(model, device, train_loader)
+    #
+    #     # cascade adv
+    #     print('Pre-train Epoch ' + str(epoch) + ': ' + str(int(time.time() - start_time)) + 's', end=', ')
+    #     print('Pre-train trn_loss: {:.4f}, trn_acc: {:.2f}%'.format(trnloss, 100. * trnacc), end=', ')
+    #     print('Pre-train adv_loss: {:.4f}, adv_acc: {:.2f}%'.format(advloss, 100. * advacc))
 
-        # get trnloss and testloss
-        trnloss, trnacc = eval_test(model, device, train_loader)
-        advloss, advacc = eval_adv_test(model, device, train_loader)
-
-        # print trnloss and testloss
-        print('Pre-train Epoch ' + str(epoch) + ': ' + str(int(time.time() - start_time)) + 's', end=', ')
-        print('Pre-train trn_loss: {:.4f}, trn_acc: {:.2f}%'.format(trnloss, 100. * trnacc), end=', ')
-        print('Pre-train adv_loss: {:.4f}, adv_acc: {:.2f}%'.format(advloss, 100. * advacc))
-
-
+    # save & read the model
+    # torch.save(model.state_dict(), str(id_) + '.pt')
+    # model_name = str(id_) + '.pt'
+    # model = Net()
+    # model.load_state_dict(torch.load(model_name))
 
     for epoch in range(1, args.epochs + 1):
         start_time = time.time()
@@ -604,7 +622,8 @@ def train_model():
     ################################################################################################
 
     # save the model
-    torch.save(model.state_dict(), str(id_) + '.pt')
+    # torch.save(model.state_dict(), str(id_) + '.pt')
+
     return model
 
 
