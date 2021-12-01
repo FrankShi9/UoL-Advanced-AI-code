@@ -15,6 +15,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from matplotlib import pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 import torchvision
@@ -529,16 +530,6 @@ def eval_adv_test(model, device, test_loader):
             test_loss += F.cross_entropy(output, target, size_average=False).item()
             pred = output.max(1, keepdim=True)[1]
             correct += pred.eq(target.view_as(pred)).sum().item()
-        # toolbox test
-            import foolbox as fb
-
-            model = ...
-            fmodel = fb.PyTorchModel(model, bounds=(0, 1))
-            import foolbox.attacks.deepfool as df
-            attack = df.LinfDeepFoolAttack()
-            epsilons = [0.0, 0.001, 0.01, 0.03, 0.1]
-            _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
-            print('robustness: ', success)
 
 
     test_loss /= len(test_loader.dataset)
@@ -555,6 +546,27 @@ def train_model():
     model_name = str(id_) + '.pt'
     model.load_state_dict(torch.load(model_name))
     model.to(device)
+
+    # toolbox test
+    import foolbox as fb
+
+    fmodel = fb.PyTorchModel(model, bounds=(0, 255))
+
+    import foolbox.attacks.deepfool as df
+    import foolbox.attacks.carlini_wagner as cw
+    attack = df.LinfDeepFoolAttack()
+    # attack = cw.L2CarliniWagnerAttack()
+
+    # epsilons = [0.001, 0.01, 0.03, 0.1]
+    epsilons = [0.1]
+
+    for batch_idx, (data, target) in enumerate(test_loader):
+        data, target = data.to(device), target.to(device)
+        data = data.view(data.size(0), 28 * 28)
+        _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
+        # print('robustness: ', success)
+        print('effective attack: ', len([i for i in success[0] if i == True])/len(success[0]))
+        print(fb.utils.accuracy(fmodel, data, target))
 
     # normal one
     # model = Net().to(device)
