@@ -23,11 +23,11 @@ from torch.autograd import Variable
 import argparse
 import time
 
-# adv_train 2: use lib mth to test robustness
-import advertorch
-from art.defences.trainer import adversarial_trainer
+## adv_train 2: use lib mth to test robustness
+# import advertorch
+# from art.defences.trainer import adversarial_trainer
 
-# Ray-tune hyper-para tuning
+## Ray-tune hyper-para tuning
 # from ray import tune
 # from ray.tune import CLIReporter
 # from ray.tune.shcedulers import ASHAScheduler
@@ -54,7 +54,7 @@ parser.add_argument('--batch-size', type=int, default=128, metavar='N',
 parser.add_argument('--test-batch-size', type=int, default=128, metavar='N',
                     help='input batch size for testing (default: 128)')
 
-parser.add_argument('--epochs', type=int, default=10, metavar='N',
+parser.add_argument('--epochs', type=int, default=5, metavar='N',
                     help='number of epochs to train')
 # parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
 #                     help='learning rate')
@@ -68,19 +68,19 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
 parser.add_argument('--random', default=True,
                     help='random initialization for PGD')
 # FGSM: num-steps:1 step-size:0.031   PGD-20: num-steps:20 step-size:0.003
-parser.add_argument('--epsilon', default=0.031, # change from 0.031 to 0.109 1/12/2021
+parser.add_argument('--epsilon', default=0.031, # scale up
                     help='perturbation')
 parser.add_argument('--num-steps', default=1,
                     help='perturb number of steps, FGSM: 1, PGD-20: 20')
 parser.add_argument('--step-size', default=0.031,
-                    help='perturb step size, FGSM: 0.031, PGD-20: 0.003')
+                    help='perturb step size, FGSM: 0.031, PGD-20: 0.003') # step size < 1/10 eps
 
 args = parser.parse_args(args=[])
 
 # cuda available or not
 use_cuda = not args.no_cuda and torch.cuda.is_available()
 # device = torch.device("cuda" if use_cuda else "cpu")
-device = torch.device("cpu")
+device = torch.device("cuda")
 
 torch.manual_seed(args.seed)
 kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
@@ -341,12 +341,12 @@ def train(args, model, device, train_loader, optimizer, epoch):
         loss = F.cross_entropy(model(adv_data),
                                target)  # adv train 0 feed adv_x in net training to shape a resilient net
 
-        #######################################################################################################################
-        ## ray tune prep
+        ##############################################################################################################
+        # # ray tune prep
         # output = model(data)
         # pred = output.max(1, keepdim=True)[1]
         # correct += pred.eq(target.view_as(pred)).sum().item()
-        #######################################################################################################################
+        ##############################################################################################################
 
         # get gradients and update
         loss.backward()
@@ -516,6 +516,7 @@ def eval_test(model, device, test_loader):
 
 def eval_adv_test(model, device, test_loader):
     # extra robustness externel toolbox test
+    # import foolbox as fb
 
     model.eval()
     test_loss = 0
@@ -529,17 +530,13 @@ def eval_adv_test(model, device, test_loader):
             test_loss += F.cross_entropy(output, target, size_average=False).item()
             pred = output.max(1, keepdim=True)[1]
             correct += pred.eq(target.view_as(pred)).sum().item()
-        # toolbox test
-            import foolbox as fb
 
-            model = ...
-            fmodel = fb.PyTorchModel(model, bounds=(0, 1))
-            import foolbox.attacks.deepfool as df
-            attack = df.LinfDeepFoolAttack()
-            epsilons = [0.0, 0.001, 0.01, 0.03, 0.1]
-            _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
-            print('robustness: ', success)
-
+            # model = ...
+            # fmodel = fb.PyTorchModel(model, bounds=(0, 1))
+            # attack = fb.attacks.LinfinityBrendelBethgeAttack()
+            # epsilons = [0.0, 0.001, 0.01, 0.03, 0.1]
+            # _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
+            # print('robustness: ', success)
 
     test_loss /= len(test_loader.dataset)
     test_accuracy = correct / len(test_loader.dataset)
@@ -550,14 +547,7 @@ def eval_adv_test(model, device, test_loader):
 
 
 def train_model():
-    # test one
-    model = Net()
-    model_name = str(id_) + '.pt'
-    model.load_state_dict(torch.load(model_name))
-    model.to(device)
-
-    # normal one
-    # model = Net().to(device)
+    model = Net().to(device)
 
     ################################################################################################
     ## Note: below is the place you need to edit to implement your own training algorithm
@@ -565,30 +555,30 @@ def train_model():
     ################################################################################################
 
     #  atld only
-    # config_feature_scatter = {
-    #     'train': True,
-    #     'epsilon': 8.0 / 255 * 2,
-    #     'num_steps': 1,
-    #     'step_size': 8.0 / 255 * 2,
-    #     'random_start': True,
-    #     'ls_factor': 0.5,
-    # }
-    # basic_net = WideResNet(depth=28,
-    #                        num_classes=10,
-    #                        widen_factor=10)
-    # basic_net = basic_net.to(device)
-    # discriminator = Discriminator_2(depth=28, num_classes=1, widen_factor=5).to(device)
-    # D_optimizer = optim.SGD(discriminator.parameters(),
-    #                         lr=1e-3,
-    #                         momentum=0.9,
-    #                         weight_decay=0.0001)
-    #
-    # net_org = Attack_FeaScatter(basic_net, config_feature_scatter, discriminator, D_optimizer)
-    # # net_org = torch.nn.DataParallel(net_org)
-    # net = net_org.basic_net
-    # discriminator = net_org.discriminator
-    # for epoch in range(1, 3):
-    #     atld_train(epoch, net)
+    config_feature_scatter = {
+        'train': True,
+        'epsilon': 8.0 / 255 * 2,
+        'num_steps': 1,
+        'step_size': 8.0 / 255 * 2,
+        'random_start': True,
+        'ls_factor': 0.5,
+    }
+    basic_net = WideResNet(depth=28,
+                           num_classes=10,
+                           widen_factor=10)
+    basic_net = basic_net.to(device)
+    discriminator = Discriminator_2(depth=28, num_classes=1, widen_factor=5).to(device)
+    D_optimizer = optim.SGD(discriminator.parameters(),
+                            lr=1e-3,
+                            momentum=0.9,
+                            weight_decay=0.0001)
+
+    net_org = Attack_FeaScatter(basic_net, config_feature_scatter, discriminator, D_optimizer)
+    # net_org = torch.nn.DataParallel(net_org)
+    net = net_org.basic_net
+    discriminator = net_org.discriminator
+    for epoch in range(1, 3):
+        atld_train(epoch, net)
 
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0002)  # adv train 0.1
 
@@ -604,7 +594,7 @@ def train_model():
     #     train(args, model, device, train_loader, optimizer, epoch)
 
     #################################################################################################################
-    #     cascade_adv_train(args, model, device, train_loader, optimizer, epoch)
+    # cascade_adv_train(args, model, device, train_loader, optimizer, epoch)
     #################################################################################################################
 
     # # get trnloss and testloss
@@ -615,7 +605,7 @@ def train_model():
     # print('Pre-train Epoch ' + str(epoch) + ': ' + str(int(time.time() - start_time)) + 's', end=', ')
     # print('Pre-train trn_loss: {:.4f}, trn_acc: {:.2f}%'.format(trnloss, 100. * trnacc), end=', ')
     # print('Pre-train adv_loss: {:.4f}, adv_acc: {:.2f}%'.format(advloss, 100. * advacc))
-    #################################################################################################################
+
     # save & read the model
     # torch.save(model.state_dict(), str(id_) + '.pt')
     # model_name = str(id_) + '.pt'
@@ -624,13 +614,11 @@ def train_model():
 
     for epoch in range(1, args.epochs + 1):
         start_time = time.time()
+        # training
+        adjust_learning_rate(optimizer, epoch)
+        train(args, model, device, train_loader, optimizer, epoch)
 
-        # training only
-        # adjust_learning_rate(optimizer, epoch) # adv_train 1.0
-        # train(args, model, device, train_loader, optimizer, epoch)
-        ##################################################################################
         # cascade_adv_train(args, model, device, train_loader, optimizer, epoch)
-        ##################################################################################
 
         # get trnloss and testloss
         trnloss, trnacc = eval_test(model, device, train_loader)
@@ -643,7 +631,7 @@ def train_model():
 
         ################################################################################################
         ## end of training method
-        #############################################################################################
+    #############################################################################################
 
     ## save the model
     # torch.save(model.state_dict(), str(id_) + '.pt')
@@ -736,4 +724,3 @@ model = train_model()
 'the robustness of the model is evaluated against the infinite-norm distance measure'
 '!!! important: MAKE SURE the infinite-norm distance (epsilon p) less than 0.11 !!!'
 p_distance(model, train_loader, device)
-

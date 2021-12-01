@@ -186,7 +186,7 @@ class Attack_FeaScatter(nn.Module):
         alpha = torch.rand(x.size(0), 10, 1, 1)
 
         logits_pred_nat, fea_nat, _ = aux_net(inputs)
-        logits_pred_nat_D = torch.reshape(logits_pred_nat, [x.size(0), 10, 1, 1])
+        logits_pred_nat_D = torch.reshape(logits_pred_nat, [x.size(0), 10, 1, 1]) #should change here
 
         num_classes = logits_pred_nat.size(1)
         y_gt = one_hot_tensor(targets, num_classes, device)
