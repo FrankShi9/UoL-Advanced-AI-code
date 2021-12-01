@@ -37,6 +37,7 @@ from attack_methods_new_cifar10 import *
 from tqdm import tqdm
 from WideResnet import *
 from dis_atld import *
+
 # input id
 
 
@@ -52,12 +53,12 @@ parser.add_argument('--batch-size', type=int, default=128, metavar='N',
 parser.add_argument('--test-batch-size', type=int, default=128, metavar='N',
                     help='input batch size for testing (default: 128)')
 
-parser.add_argument('--epochs', type=int, default=2, metavar='N',
+parser.add_argument('--epochs', type=int, default=5, metavar='N',
                     help='number of epochs to train')
 # parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
 #                     help='learning rate')
 parser.add_argument('--lr', type=float, default=0.1, metavar='LR',
-                    help='learning rate') # cascade version
+                    help='learning rate')  # cascade version, original = 0.01
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
@@ -244,7 +245,6 @@ def calc_cw(model, X, epsilon=args.epsilon):
     X_adv = Variable(X.data + noise)
     X_cw = X_adv
     for batch_idx, (data, target) in enumerate(train_loader):
-
         data, target = data.to(device), target.to(device)
 
         # change here use marginal loss instead
@@ -264,6 +264,7 @@ def calc_cw(model, X, epsilon=args.epsilon):
 
     return X_cw
 
+
 # GT attack: sub-optimal better than c&w for single un-composite attack
 def calc_gt(model, X, X_ac, epsilon=args.epsilon):
     eps_min = 0
@@ -272,11 +273,11 @@ def calc_gt(model, X, X_ac, epsilon=args.epsilon):
     x_b = X_ac
     eps = 0.
     x_h = None
-    while eps_max-eps_min > t:
-        eps = (eps_max+eps_min) / 2
+    while eps_max - eps_min > t:
+        eps = (eps_max + eps_min) / 2
         # !!Invoke Reluplex to test whether ∃x!!
         if x_h is not None:
-            eps_max =  torch.norm(x_h - X , float('inf'))
+            eps_max = torch.norm(x_h - X, float('inf'))
             x_b = x_h
         else:
             eps_min = eps
@@ -284,7 +285,7 @@ def calc_gt(model, X, X_ac, epsilon=args.epsilon):
     return x_b
 
 
-# natural attack: Rotation and Translation # ??
+# natural attack: Rotation and Translation # No for now
 
 
 'generate adversarial data, you can define your adversarial method'
@@ -300,28 +301,27 @@ def adv_attack(model, X, y, device):
     noise = cw_l2_attack(model, X, y)
     X_adv = Variable(X_adv.data + noise)
 
-
-    #random noise
+    # random noise
     # random_noise = torch.FloatTensor(*X_adv.shape).uniform_(-0.1, 0.1).to(device)
     # X_adv = Variable(X_adv.data + random_noise)
-
 
     # X_adv = fgsm_attack(X, epsilon)
     # X_adv = linPGDAttack(X, y, model, LinPGDAttack(model))
     # X_adv = pgd_whitebox(model, X, y)
     # X_adv = calc_cw(model, X)
 
-    #goes with the upper 4
+    # goes with the upper 4
     X_adv = Variable(X_adv.data)
 
-
-#####################################################################
-## end of attack method
-####################################################################
+    #####################################################################
+    ## end of attack method
+    ####################################################################
     return X_adv
 
 
 'train function, you can use adversarial training'
+
+
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
     # correct = 0
@@ -336,34 +336,40 @@ def train(args, model, device, train_loader, optimizer, epoch):
         optimizer.zero_grad()
 
         loss = F.cross_entropy(model(data), target)
-        # loss = F.cross_entropy(model(adv_data), target) # adv train 0 feed adv_x in net training to shape a resilient net
+        loss = F.cross_entropy(model(adv_data),
+                               target)  # adv train 0 feed adv_x in net training to shape a resilient net
 
+        #######################################################################################################################
         ## ray tune prep
         # output = model(data)
         # pred = output.max(1, keepdim=True)[1]
         # correct += pred.eq(target.view_as(pred)).sum().item()
+        #######################################################################################################################
 
         # get gradients and update
         loss.backward()
         optimizer.step()
 
-        ## ray tune
-        # with tune.checkpoint_dir(epoch) as checkpoint_dir:
-        #     path = os.path.join(checkpoint_dir, "checkpoint")
-        #     torch.save((Net.state_dict(), optimizer.state_dict()), path)
-        # tune.report(loss=(loss / len(train_loader.dataset)), accuracy=correct / len(train_loader.dataset))
 
-##############################################################
+#######################################################################################################################
+# ray tune
+# with tune.checkpoint_dir(epoch) as checkpoint_dir:
+#     path = os.path.join(checkpoint_dir, "checkpoint")
+#     torch.save((Net.state_dict(), optimizer.state_dict()), path)
+# tune.report(loss=(loss / len(train_loader.dataset)), accuracy=correct / len(train_loader.dataset))
+#######################################################################################################################
+
+#######################################################################################################################
 # advanced adv train 1: cascade adversarial method
 # which can produce adversarial images in every mini-batch. Namely, at each batch, it performs a
 # separate adversarial training by putting the adversarial images (produced in that batch) into
 # the training dataset
-##############################################################
+#######################################################################################################################
 
-##############################################################
+#######################################################################################################################
 # advanced adv train 2: ensemble adversarial training
 # which augments training data with perturbations transferred       # from other models.
-##############################################################
+#######################################################################################################################
 
 
 def cascade_adv_train(args, model, device, train_loader, optimizer, epoch):
@@ -412,7 +418,6 @@ def atld_train(epoch, net):
                             momentum=0.9,
                             weight_decay=0.0001)
 
-
     net_org = Attack_FeaScatter(basic_net, config_feature_scatter, discriminator, D_optimizer)
     optimizer = optim.SGD(net.parameters(),
                           lr=args.lr,
@@ -456,11 +461,10 @@ def atld_train(epoch, net):
         # forward
         outputs, loss_fs, gan_loss, scale = net_org(inputs.detach(), targets)
 
-
         optimizer.zero_grad()
         loss = loss_fs.mean()
-        print('loss_fs:',loss_fs.item())
-        #print('gan_loss:', gan_loss.item())
+        print('loss_fs:', loss_fs.item())
+        # print('gan_loss:', gan_loss.item())
         loss = (loss + gan_loss * scale / 2)
         loss.backward(retain_graph=True)
         for name, parms in net.named_parameters():
@@ -475,7 +479,6 @@ def atld_train(epoch, net):
                 parms.grad = parms.grad.clamp(min_threshold, max_threshold)
         optimizer.step()
 
-
         train_loss = loss.item()
 
         duration = time.time() - start_time
@@ -488,9 +491,9 @@ def atld_train(epoch, net):
             nat_acc = get_acc(nat_outputs, targets)
 
 
-
-
 'predict function'
+
+
 def eval_test(model, device, test_loader):
     model.eval()
     test_loss = 0
@@ -544,7 +547,7 @@ def eval_adv_test(model, device, test_loader):
 def train_model():
     model = Net().to(device)
 
-    #####################################################################
+    ################################################################################################
     ## Note: below is the place you need to edit to implement your own training algorithm
     ##       You can also edit the functions such as train(...).
     ################################################################################################
@@ -575,26 +578,32 @@ def train_model():
     # for epoch in range(1, 3):
     #     atld_train(epoch, net)
 
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0002)  # adv train 0.1
 
-    # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0002)  # adv train 1
     # optimizer = optim.Adam(model.parameters(), lr=0.0001)  # bad on fgsm feed adv train/ only for c&w solve
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0001)  # for cascade adv
-    # train
 
-    # for epoch in range(1, 3): # pre-train 2 epoch given cascade paper for MNIST
+    # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0001)  # for cascade adv
+
+    # # pre-train 2 epoch given cascade paper for MNIST
+    # for epoch in range(1, 3):
     #     start_time = time.time()
     #     # training
     #     adjust_learning_rate(optimizer, epoch)
     #     train(args, model, device, train_loader, optimizer, epoch)
-    #
-    #     # get trnloss and testloss
-    #     trnloss, trnacc = eval_test(model, device, train_loader)
-    #     advloss, advacc = eval_adv_test(model, device, train_loader)
-    #
-    #     # cascade adv
-    #     print('Pre-train Epoch ' + str(epoch) + ': ' + str(int(time.time() - start_time)) + 's', end=', ')
-    #     print('Pre-train trn_loss: {:.4f}, trn_acc: {:.2f}%'.format(trnloss, 100. * trnacc), end=', ')
-    #     print('Pre-train adv_loss: {:.4f}, adv_acc: {:.2f}%'.format(advloss, 100. * advacc))
+
+    #################################################################################################################
+        # cascade_adv_train(args, model, device, train_loader, optimizer, epoch)
+    #################################################################################################################
+
+
+        # # get trnloss and testloss
+        # trnloss, trnacc = eval_test(model, device, train_loader)
+        # advloss, advacc = eval_adv_test(model, device, train_loader)
+        #
+        # # cascade adv
+        # print('Pre-train Epoch ' + str(epoch) + ': ' + str(int(time.time() - start_time)) + 's', end=', ')
+        # print('Pre-train trn_loss: {:.4f}, trn_acc: {:.2f}%'.format(trnloss, 100. * trnacc), end=', ')
+        # print('Pre-train adv_loss: {:.4f}, adv_acc: {:.2f}%'.format(advloss, 100. * advacc))
 
     # save & read the model
     # torch.save(model.state_dict(), str(id_) + '.pt')
@@ -607,6 +616,8 @@ def train_model():
         # training
         adjust_learning_rate(optimizer, epoch)
         train(args, model, device, train_loader, optimizer, epoch)
+
+        # cascade_adv_train(args, model, device, train_loader, optimizer, epoch)
 
         # get trnloss and testloss
         trnloss, trnacc = eval_test(model, device, train_loader)
@@ -621,7 +632,7 @@ def train_model():
         ## end of training method
     ################################################################################################
 
-    # save the model
+    ## save the model
     # torch.save(model.state_dict(), str(id_) + '.pt')
 
     return model
@@ -650,7 +661,6 @@ def adjust_learning_rate_c(optimizer, ite):
         param_group['lr'] = lr
 
 
-
 'compute perturbation distance'
 
 
@@ -660,7 +670,7 @@ def p_distance(model, train_loader, device):
         data, target = data.to(device), target.to(device)
         data = data.view(data.size(0), 28 * 28)
         adv_data = adv_attack(model, data, target, device=device)
-        p.append(torch.norm(data - adv_data, float('inf'))) # infinity norm
+        p.append(torch.norm(data - adv_data, float('inf')))  # infinity norm
     print('epsilon p: ', max(p))
 
 
@@ -712,6 +722,3 @@ model = train_model()
 'the robustness of the model is evaluated against the infinite-norm distance measure'
 '!!! important: MAKE SURE the infinite-norm distance (epsilon p) less than 0.11 !!!'
 p_distance(model, train_loader, device)
-
-
-
