@@ -313,6 +313,10 @@ def adv_attack(model, X, y, device):
     # X_adv = pgd_whitebox(model, X, y)
     # X_adv = calc_cw(model, X)
 
+    #Auto
+    from autoattack import AutoAttack
+    adversary = AutoAttack(train_set, norm='Linf', eps=epsilon, version='standard') # un-tested
+
     # goes with the upper 4
     X_adv = Variable(X_adv.data)
 
