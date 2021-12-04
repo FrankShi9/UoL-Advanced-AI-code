@@ -15,6 +15,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from art.estimators.classification import PyTorchClassifier
 from matplotlib import pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
@@ -41,6 +42,10 @@ from tqdm import tqdm
 from WideResnet import *
 from dis_atld import *
 
+#auto attack test
+from art.attacks.evasion import AutoAttack
+
+
 # input id
 id_ = 201600830
 
@@ -53,7 +58,7 @@ parser.add_argument('--batch-size', type=int, default=128, metavar='N',
 parser.add_argument('--test-batch-size', type=int, default=128, metavar='N',
                     help='input batch size for testing (default: 128)')
 
-parser.add_argument('--epochs', type=int, default=10, metavar='N', # 1 for test, 10 for train
+parser.add_argument('--epochs', type=int, default=1, metavar='N', # 1 for test, 10 for train
                     help='number of epochs to train')
 # parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
 #                     help='learning rate')
@@ -66,13 +71,13 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
 
 parser.add_argument('--random', default=True,
                     help='random initialization for PGD')
-# FGSM: num-steps:1 step-size:0.031   PGD-20: num-steps:20 step-size:0.003
+# FGSM: num-steps:1 step-size:0.1099   PGD-20: num-steps:20 step-size:0.005495
 parser.add_argument('--epsilon', default=0.1099, # change from 0.031 to 0.1099 1/12/2021
                     help='perturbation')
-parser.add_argument('--num-steps', default=1,
-                    help='perturb number of steps, FGSM: 1, PGD-20: 20')
-parser.add_argument('--step-size', default=0.1099, # change from 0.031 to 0.1099 1/12/2021
-                    help='perturb step size, FGSM: 0.031, PGD-20: 0.003')
+parser.add_argument('--num-steps', default=40,
+                    help='perturb number of steps, FGSM: 1, PGD-20: 20') # change from 1 to 20 3/12/2021 -> to 50 -> 100 -> 40
+parser.add_argument('--step-size', default=0.011, # change from 0.031 to 0.1099 1/12/2021 -> from 0.1099 to 0.005495 -> from 0.005495 to 0.011 on 3/12/2021
+                    help='perturb step size, FGSM: 0.1099, PGD-20: 0.005495') # change from 0.1099 to 0.005495 3/12/2021
 
 args = parser.parse_args(args=[])
 
@@ -296,7 +301,9 @@ def calc_gt(model, X, X_ac, epsilon=args.epsilon):
 
 def adv_attack(model, X, y, device):
     X_adv = Variable(X.data)
-
+    # for auto only
+    # X = Variable(X.float(), requires_grad=True)
+    # y = Variable(y.float(), requires_grad=True)
     #####################################################################
     ## Note: below is the place you need to edit to implement your own attack algorithm
     ####################################################################
@@ -315,8 +322,23 @@ def adv_attack(model, X, y, device):
     X_adv = pgd_whitebox(model, X, y)
     # X_adv = fgsm_attack(X, args.epsilon)
     # X_adv = linPGDAttack(X, y, model, LinPGDAttack(model))
+
     ## untested below
     # X_adv = calc_cw(model, X)
+
+    ## AutoAttack ##bug!!##
+    # optimizer = optim.SGD(model.parameters(), lr=args.lr)
+    # criterion = nn.CrossEntropyLoss()
+    # classifier = PyTorchClassifier(
+    #     model=model,
+    #     clip_values=(0, 255),
+    #     loss=criterion,
+    #     optimizer=optimizer,
+    #     input_shape=(1, 784),
+    #     nb_classes=10,
+    # )
+    # auto = AutoAttack(estimator=classifier, eps=0.1099, batch_size=128)
+    # X_adv = torch.tensor(auto.generate(X.view(X.size(0), 28 * 28).detach().numpy(), y.detach().numpy()))
 
     # # goes with the upper 4 ones
     X_adv = Variable(X_adv.data)
@@ -545,14 +567,15 @@ def eval_adv_test(model, device, test_loader):
 
 
 def train_model():
+
     ## test one (read and load)
-    # model = Net()
-    # model_name = str(id_) + '.pt'
-    # model.load_state_dict(torch.load(model_name))
-    # model.to(device)
+    model = Net()
+    model_name = str(id_) + '.pt'
+    model.load_state_dict(torch.load(model_name))
+    model.to(device)
 
     ## normal one (send)
-    model = Net().to(device)
+    # model = Net().to(device)
 
 ##########################################################################
     # # toolbox test
@@ -631,48 +654,48 @@ def train_model():
     # for epoch in range(1, 3):
     #     atld_train(epoch, net)
 
-    # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0002)  # adv train 0.1
+    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0002)  # adv train 0.1
 
     # optimizer = optim.Adam(model.parameters(), lr=0.0001)  # bad on fgsm feed adv train/ only for c&w solve
 
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0001)  # for cascade adv
+    # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0001)  # for cascade adv
+    #
+    # # # pre-train 2 epoch given cascade paper for MNIST
+    # for epoch in range(1, 3):
+    #     start_time = time.time()
+    #     # training
+    #     # adjust_learning_rate(optimizer, epoch)
+    #     # train(args, model, device, train_loader, optimizer, epoch)
+    # #################################################################################################################
+    #     cascade_adv_train(args, model, device, train_loader, optimizer, epoch)
+    # #################################################################################################################
+    #
+    #     # get trnloss and testloss
+    #     trnloss, trnacc = eval_test(model, device, train_loader)
+    #     advloss, advacc = eval_adv_test(model, device, train_loader)
+    #
+    #     # cascade adv train
+    #     print('Pre-train Epoch ' + str(epoch) + ': ' + str(int(time.time() - start_time)) + 's', end=', ')
+    #     print('Pre-train trn_loss: {:.4f}, trn_acc: {:.2f}%'.format(trnloss, 100. * trnacc), end=', ')
+    #     print('Pre-train adv_loss: {:.4f}, adv_acc: {:.2f}%'.format(advloss, 100. * advacc))
+    # #################################################################################################################
+    # ## save pre-trained model
+    # torch.save(model.state_dict(), str(id_) + '.pt')
 
-    # # pre-train 2 epoch given cascade paper for MNIST
-    for epoch in range(1, 3):
-        start_time = time.time()
-        # training
-        # adjust_learning_rate(optimizer, epoch)
-        # train(args, model, device, train_loader, optimizer, epoch)
-    #################################################################################################################
-        cascade_adv_train(args, model, device, train_loader, optimizer, epoch)
-    #################################################################################################################
-
-        # get trnloss and testloss
-        trnloss, trnacc = eval_test(model, device, train_loader)
-        advloss, advacc = eval_adv_test(model, device, train_loader)
-
-        # cascade adv train
-        print('Pre-train Epoch ' + str(epoch) + ': ' + str(int(time.time() - start_time)) + 's', end=', ')
-        print('Pre-train trn_loss: {:.4f}, trn_acc: {:.2f}%'.format(trnloss, 100. * trnacc), end=', ')
-        print('Pre-train adv_loss: {:.4f}, adv_acc: {:.2f}%'.format(advloss, 100. * advacc))
-    #################################################################################################################
-    ## save the model
-    torch.save(model.state_dict(), str(id_) + '.pt')
-
-    ## read model
-    model_name = str(id_) + '.pt'
-    model = Net()
-    model.load_state_dict(torch.load(model_name))
+    ## read pre-trained model
+    # model_name = str(id_) + '.pt'
+    # model = Net()
+    # model.load_state_dict(torch.load(model_name))
     #################################################################################################################
 
     for epoch in range(1, args.epochs + 1):
-        start_time = time.time()
+        start_time = time.time() # time is accurate
 
         ## training only
         # adjust_learning_rate(optimizer, epoch) # adv_train 1.0
         # train(args, model, device, train_loader, optimizer, epoch)
         ##################################################################################
-        cascade_adv_train(args, model, device, train_loader, optimizer, epoch)
+        # cascade_adv_train(args, model, device, train_loader, optimizer, epoch)
         ##################################################################################
 
         # get trnloss and testloss
@@ -688,7 +711,7 @@ def train_model():
         ## end of training method
         #############################################################################################
 
-    ## save the model
+    ## save the final model
     # torch.save(model.state_dict(), str(id_) + '.pt')
 
     return model

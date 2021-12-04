@@ -656,11 +656,17 @@ def train_model():
         ################################################################################################
         ## end of training method
         #############################################################################################
-        ## Auto for defense check only  !! un-tested !!
+        ## Auto for defense check only  !! bug !!
         from autoattack import AutoAttack
         adv = AutoAttack(model, norm='Linf', eps=args.epsilon, version='standard')
-        for data, target in test_loader:
-            adv.run_standard_evaluation(data, target)
+        # model.eval()
+        with torch.no_grad():
+            for data, target in test_loader:
+                data, target = data.to(device), target.to(device)
+                data = data.view(data.size(0), 28 * 28)
+                output = model(data)
+                pred = output.max(1, keepdim=True)[1]
+                adv.run_standard_evaluation(x_orig=data.view(data.size(0), 28 * 28), y_orig=target, bs=128)
 
     ## save the model
     # torch.save(model.state_dict(), str(id_) + '.pt')

@@ -33,7 +33,7 @@ parser.add_argument('--batch-size', type=int, default=128, metavar='N',
                     help='input batch size for training (default: 128)')
 parser.add_argument('--test-batch-size', type=int, default=128, metavar='N',
                     help='input batch size for testing (default: 128)')
-parser.add_argument('--epochs', type=int, default=2, metavar='N',
+parser.add_argument('--epochs', type=int, default=10, metavar='N',
                     help='number of epochs to train')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate')
@@ -258,12 +258,12 @@ def adv_attack(model, X, y, device):
     # X_adv = Variable(X_adv.data + random_noise)
 
     #CW
-    noise = cw_l2_attack(model, X, y)
-    X_adv = Variable(X_adv.data + noise)
+    # noise = cw_l2_attack(model, X, y)
+    # X_adv = Variable(X_adv.data + noise)
 
     #PGD
-    # X_adv = pgd_whitebox(model, X, y)
-    # X_adv = Variable(X_adv.data)
+    X_adv = pgd_whitebox(model, X, y)
+    X_adv = Variable(X_adv.data)
     ################################################################################################
     ## end of attack method
     ################################################################################################
@@ -280,14 +280,14 @@ def train(args, model, device, train_loader, optimizer, epoch):
         data = data.view(data.size(0), 28 * 28)
 
         # use adverserial data to train the defense model
-        # adv_data = adv_attack(model, data, target, device=device)
+        adv_data = adv_attack(model, data, target, device=device)
 
         # clear gradients
         optimizer.zero_grad()
 
         # compute loss
-        # loss = F.cross_entropy(model(adv_data), target)
-        loss = F.cross_entropy(model(data), target)
+        loss = F.cross_entropy(model(adv_data), target)
+        # loss = F.cross_entropy(model(data), target)
 
         # get gradients and update
         loss.backward()
@@ -343,6 +343,7 @@ def train_model():
     ##       You can also edit the functions such as train(...). 
     ################################################################################################
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=0.01)
     for epoch in range(1, args.epochs + 1):
         start_time = time.time()
 
