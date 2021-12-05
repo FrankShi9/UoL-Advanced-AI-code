@@ -7,7 +7,7 @@
 ###
 ### The score is based on both algorithms.
 ######################################################################
-import os
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -20,11 +20,7 @@ from torch.autograd import Variable
 import argparse
 import time
 
-# Ray-tune hyper-para tuning
-# from ray import tune
-# from ray.tune import CLIReporter
-# from ray.tune.shcedulers import ASHAScheduler
-# from functools import partial
+
 
 
 
@@ -74,22 +70,13 @@ kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 ######################################################################
 ################    don't change the below code
 ######################################################################
-train_set = torchvision.datasets.FashionMNIST(root='../data', train=True, download=True,
+train_set = torchvision.datasets.FashionMNIST(root='data', train=True, download=True,
                                               transform=transforms.Compose([transforms.ToTensor()]))
 train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
 
-test_set = torchvision.datasets.FashionMNIST(root='../data', train=False, download=True,
+test_set = torchvision.datasets.FashionMNIST(root='data', train=False, download=True,
                                              transform=transforms.Compose([transforms.ToTensor()]))
 test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
-# test_set = torchvision.datasets.MNIST(root='../data', train=False, download=True,
-#                                              transform=transforms.Compose([transforms.ToTensor()]))
-# test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
-# test_set = torchvision.datasets.EMNIST(root='../data', split='letters', train=False, download=True,
-#                                              transform=transforms.Compose([transforms.ToTensor()]))
-# test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
-# test_set = torchvision.datasets.KMNIST(root='../data', train=False, download=True,
-#                                              transform=transforms.Compose([transforms.ToTensor()]))
-# test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
 
 
 
@@ -135,7 +122,7 @@ def pgd_whitebox(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, st
     # timecost_now = int(time.time() - start_time) uses 3s
     timecost_now = 0
 
-    while i < num_steps and timecost_now < 0.09:
+    while i < num_steps and timecost_now < 0.1:
         opt = optim.SGD([X_pgd], lr=1e-3)
         opt.zero_grad()
 
@@ -151,7 +138,7 @@ def pgd_whitebox(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, st
         timecost_now = float(time_now - start_time)
         i += 1
 
-    print(timecost_now, i)
+    # print(timecost_now, i)
     return X_pgd
 
 
@@ -195,41 +182,11 @@ def train(args, model, device, train_loader, optimizer, epoch):
         optimizer.zero_grad()
 
         loss = F.cross_entropy(model(data), target)
-        loss = F.cross_entropy(model(adv_data),
-                               target)  # adv train 0 feed adv_x in net training to shape a resilient net
-
-        #######################################################################################################################
-        ## ray tune prep
-        # output = model(data)
-        # pred = output.max(1, keepdim=True)[1]
-        # correct += pred.eq(target.view_as(pred)).sum().item()
-        #######################################################################################################################
+        loss = F.cross_entropy(model(adv_data), target)  # adv train 0 feed adv_x in net training to shape a resilient net
 
         # get gradients and update
         loss.backward()
         optimizer.step()
-
-
-# ray tune
-#######################################################################################################################
-# ray tune
-# with tune.checkpoint_dir(epoch) as checkpoint_dir:
-#     path = os.path.join(checkpoint_dir, "checkpoint")
-#     torch.save((Net.state_dict(), optimizer.state_dict()), path)
-# tune.report(loss=(loss / len(train_loader.dataset)), accuracy=correct / len(train_loader.dataset))
-#######################################################################################################################
-
-#######################################################################################################################
-# advanced adv train 1: cascade adversarial method
-# which can produce adversarial images in every mini-batch. Namely, at each batch, it performs a
-# separate adversarial training by putting the adversarial images (produced in that batch) into
-# the training dataset
-#######################################################################################################################
-
-#######################################################################################################################
-# advanced adv train 2: ensemble adversarial training
-# which augments training data with perturbations transferred       # from other models.
-#######################################################################################################################
 
 
 'predict function'
@@ -259,14 +216,14 @@ def eval_adv_test(model, device, test_loader):
     test_loss = 0
     correct = 0
     #debug only
-    cnt = 0
+    # cnt = 0
 
     with torch.no_grad():
         for data, target in test_loader:
-            cnt += 1
+            # cnt += 1
             data, target = data.to(device), target.to(device)
             data = data.view(data.size(0), 28 * 28)
-            print('batch: ', cnt)
+            # print('batch: ', cnt)
             adv_data = adv_attack(model, data, target, device=device)
             output = model(adv_data)
             test_loss += F.cross_entropy(output, target, size_average=False).item()
@@ -285,59 +242,13 @@ def eval_adv_test(model, device, test_loader):
 def train_model():
 
     ## test one (read and load)
-    model = Net()
-    model_name = str(id_) + '.pt'
-    model.load_state_dict(torch.load(model_name))
-    model.to(device)
+    # model = Net()
+    # model_name = str(id_) + '.pt'
+    # model.load_state_dict(torch.load(model_name))
+    # model.to(device)
 
     ## normal one (send)
-    # model = Net().to(device)
-
-##########################################################################
-
-    ## toolbox test
-    # import foolbox as fb
-    # fmodel = fb.PyTorchModel(model, bounds=(0, 255))
-    #
-    # import foolbox.attacks.fast_gradient_method as fgsm
-    # import foolbox.attacks.deepfool as df
-    # import foolbox.attacks.carlini_wagner as cw
-    # import foolbox.attacks.projected_gradient_descent as pgd
-    # import foolbox.attacks.brendel_bethge as bb
-    # import foolbox.attacks.newtonfool as new
-    # import foolbox.attacks.ead as ead
-    # import foolbox.attacks.ddn as ddn
-    # import foolbox.attacks.gradient_descent_base as gd
-    # import foolbox.attacks.virtual_adversarial_attack as va
-    # import foolbox.attacks.spatial_attack as sa
-    # import foolbox.attacks.saltandpepper as sp
-
-
-    # attack = fgsm.LinfFastGradientAttack()
-    # attack = df.LinfDeepFoolAttack()
-    # attack = pgd.LinfProjectedGradientDescentAttack()
-    # # attack = cw.L2CarliniWagnerAttack() # cannot run since take too long
-    # # attack = ead.EADAttack() # cannot run since take too long
-    # # attack = bb.LinfinityBrendelBethgeAttack() # assertion error
-    # # attack = new.NewtonFoolAttack()
-    # # attack = ddn.DDNAttack()
-    # # attack = gd.LinfBaseGradientDescent(rel_stepsize=20, steps=20, random_start=True)
-    # # attack = va.VirtualAdversarialAttack(steps=20)
-    # # attack = sa.SpatialAttack() #only implemented for inputs with two spatial dimensions (and one channel and one batch dimension)
-    # # attack = sp.SaltAndPepperNoiseAttack()
-    #
-    #
-    # # epsilons = [0.001, 0.01, 0.03, 0.1]
-    # epsilons = [0.1099]
-    #
-    # for batch_idx, (data, target) in enumerate(test_loader):
-    #     data, target = data.to(device), target.to(device)
-    #     data = data.view(data.size(0), 28 * 28)
-    #     _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
-    #     # print('robustness: ', success)
-    #     print('effective attack: ', len([i for i in success[0] if i == True])/len(success[0]))
-    #     print(fb.utils.accuracy(fmodel, data, target))
-###########################################################################
+    model = Net().to(device)
 
 
     ################################################################################################
@@ -351,8 +262,8 @@ def train_model():
         start_time = time.time() # time is accurate
 
         ## training only
-        # adjust_learning_rate(optimizer, epoch) # adv_train 1.0
-        # train(args, model, device, train_loader, optimizer, epoch)
+        adjust_learning_rate(optimizer, epoch) # adv_train 1.0
+        train(args, model, device, train_loader, optimizer, epoch)
 
         # get trnloss and testloss
         trnloss, trnacc = eval_test(model, device, train_loader)
@@ -368,7 +279,7 @@ def train_model():
         #############################################################################################
 
     ## save the final model
-    # torch.save(model.state_dict(), str(id_) + '.pt')
+    torch.save(model.state_dict(), str(id_) + '.pt')
 
     return model
 
@@ -444,6 +355,6 @@ model = train_model()
 
 'Call adv_attack() method on a pre-trained model'
 'the robustness of the model is evaluated against the infinite-norm distance measure'
-'!!! important: MAKE SURE the infinite-norm distance (epsilon p) less than 0.11 !!!'
+
 p_distance(model, train_loader, device)
 
