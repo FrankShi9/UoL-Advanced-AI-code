@@ -56,7 +56,7 @@ parser.add_argument('--random', default=True,
 # FGSM: num-steps:1 step-size:0.1099   PGD-20: num-steps:20 step-size:0.005495
 parser.add_argument('--epsilon', default=0.1099, # change from 0.031 to 0.1099 1/12/2021
                     help='perturbation')
-parser.add_argument('--num-steps', default=100,
+parser.add_argument('--num-steps', default=40,
                     help='perturb number of steps, FGSM: 1, PGD-20: 20') # change from 1 to 20 3/12/2021 -> to 50 -> 100 -> 40
 parser.add_argument('--step-size', default=0.011, # change from 0.031 to 0.1099 1/12/2021 -> from 0.1099 to 0.005495 -> from 0.005495 to 0.011 on 3/12/2021
                     help='perturb step size, FGSM: 0.1099, PGD-20: 0.005495') # change from 0.1099 to 0.005495 3/12/2021
@@ -81,7 +81,15 @@ train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
 test_set = torchvision.datasets.FashionMNIST(root='../data', train=False, download=True,
                                              transform=transforms.Compose([transforms.ToTensor()]))
 test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
-
+# test_set = torchvision.datasets.MNIST(root='../data', train=False, download=True,
+#                                              transform=transforms.Compose([transforms.ToTensor()]))
+# test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
+# test_set = torchvision.datasets.EMNIST(root='../data', split='letters', train=False, download=True,
+#                                              transform=transforms.Compose([transforms.ToTensor()]))
+# test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
+# test_set = torchvision.datasets.KMNIST(root='../data', train=False, download=True,
+#                                              transform=transforms.Compose([transforms.ToTensor()]))
+# test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
 
 # define fully connected network
 class Net(nn.Module):
@@ -125,7 +133,7 @@ def pgd_whitebox(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, st
     # timecost_now = int(time.time() - start_time) uses 3s
     timecost_now = 0
 
-    while i < num_steps and timecost_now < 1e-10:
+    while i < num_steps and timecost_now < 0.1:
         opt = optim.SGD([X_pgd], lr=1e-3)
         opt.zero_grad()
 
@@ -138,7 +146,7 @@ def pgd_whitebox(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, st
         X_pgd = Variable(X.data + eta, requires_grad=True)
         X_pgd = Variable(torch.clamp(X_pgd, 0, 1.0), requires_grad=True)
         time_now = time.time()
-        timecost_now = int(time_now - start_time)
+        timecost_now = float(time_now - start_time)
         i += 1
 
     print(timecost_now, i)
