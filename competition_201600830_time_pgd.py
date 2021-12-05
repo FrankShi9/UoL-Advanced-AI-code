@@ -91,6 +91,8 @@ test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
 #                                              transform=transforms.Compose([transforms.ToTensor()]))
 # test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
 
+
+
 # define fully connected network
 class Net(nn.Module):
     def __init__(self):
