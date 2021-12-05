@@ -135,7 +135,7 @@ def pgd_whitebox(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, st
     # timecost_now = int(time.time() - start_time) uses 3s
     timecost_now = 0
 
-    while i < num_steps and timecost_now < 0.09:
+    while i < num_steps and timecost_now < 0.08:
         opt = optim.SGD([X_pgd], lr=1e-3)
         opt.zero_grad()
 
