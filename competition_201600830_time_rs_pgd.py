@@ -56,7 +56,7 @@ parser.add_argument('--random', default=True,
 # FGSM: num-steps:1 step-size:0.1099   PGD-20: num-steps:20 step-size:0.005495
 parser.add_argument('--epsilon', default=0.1099, # change from 0.031 to 0.1099 1/12/2021
                     help='perturbation')
-parser.add_argument('--num-steps', default=40,
+parser.add_argument('--num-steps', default=20,
                     help='perturb number of steps, FGSM: 1, PGD-20: 20') # change from 1 to 20 3/12/2021 -> to 50 -> 100 -> 40
 parser.add_argument('--step-size', default=0.011, # change from 0.031 to 0.1099 1/12/2021 -> from 0.1099 to 0.005495 -> from 0.005495 to 0.011 on 3/12/2021
                     help='perturb step size, FGSM: 0.1099, PGD-20: 0.005495') # change from 0.1099 to 0.005495 3/12/2021
@@ -122,27 +122,30 @@ class Net(nn.Module):
 
 
 
-def pgd_whitebox(model, X, y, restarts, epsilon=args.epsilon, num_steps=args.num_steps, step_size=args.step_size):
+def pgd_whitebox(model, X, y, restarts=int(args.num_steps/2), epsilon=args.epsilon, num_steps=args.num_steps, step_size=args.step_size):
     start_time = time.time()
     out = model(X)
 
     X_pgd = Variable(X.data, requires_grad=True)
-    if args.random:
-        random_noise = torch.FloatTensor(*X_pgd.shape).uniform_(-epsilon, epsilon).to(device)
-        X_pgd = Variable(X_pgd.data + random_noise, requires_grad=True)
 
     i = 0
+    j = 0
     # timecost_now = int(time.time() - start_time) uses 3s
     timecost_now = 0
 
-    while i < num_steps and timecost_now < 0.08:
-        opt = optim.SGD([X_pgd], lr=1e-3)
-        opt.zero_grad()
+    while j < restarts and timecost_now < 0.08:
+        if args.random:
+            random_noise = torch.FloatTensor(*X_pgd.shape).uniform_(-epsilon, epsilon).to(device)
+            X_pgd = Variable(X_pgd.data + random_noise, requires_grad=True)
 
-        for i in range(restarts):
-            eta = torch.randn_like(X, requires_grad=True)
-            eta.data = eta.data * 2 * epsilon - epsilon
-            
+        while i < num_steps and timecost_now < 0.08:
+            opt = optim.SGD([X_pgd], lr=1e-3)
+            opt.zero_grad()
+
+
+                # eta = torch.randn_like(X, requires_grad=True)
+                # eta.data = eta.data * 2 * epsilon - epsilon
+
             with torch.enable_grad():
                 loss = nn.CrossEntropyLoss()(model(X_pgd), y)
             loss.backward()
@@ -153,8 +156,10 @@ def pgd_whitebox(model, X, y, restarts, epsilon=args.epsilon, num_steps=args.num
             X_pgd = Variable(torch.clamp(X_pgd, 0, 1.0), requires_grad=True)
             time_now = time.time()
             timecost_now = float(time_now - start_time)
-            i += 1
 
+            i += 1
+        j += 1
+    #debug
     print(timecost_now, i)
     return X_pgd
 

@@ -58,7 +58,7 @@ parser.add_argument('--batch-size', type=int, default=128, metavar='N',
 parser.add_argument('--test-batch-size', type=int, default=128, metavar='N',
                     help='input batch size for testing (default: 128)')
 
-parser.add_argument('--epochs', type=int, default=1, metavar='N', # 1 for test, 10 for train
+parser.add_argument('--epochs', type=int, default=10, metavar='N', # 1 for test, 10 for train
                     help='number of epochs to train')
 # parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
 #                     help='learning rate')
@@ -74,7 +74,7 @@ parser.add_argument('--random', default=True,
 # FGSM: num-steps:1 step-size:0.1099   PGD-20: num-steps:20 step-size:0.005495
 parser.add_argument('--epsilon', default=0.1099, # change from 0.031 to 0.1099 1/12/2021
                     help='perturbation')
-parser.add_argument('--num-steps', default=100,
+parser.add_argument('--num-steps', default=20,
                     help='perturb number of steps, FGSM: 1, PGD-20: 20') # change from 1 to 20 3/12/2021 -> to 50 -> 100 -> 40
 parser.add_argument('--step-size', default=0.011, # change from 0.031 to 0.1099 1/12/2021 -> from 0.1099 to 0.005495 -> from 0.005495 to 0.011 on 3/12/2021
                     help='perturb step size, FGSM: 0.1099, PGD-20: 0.005495') # change from 0.1099 to 0.005495 3/12/2021
@@ -579,13 +579,13 @@ def eval_adv_test(model, device, test_loader):
 def train_model():
 
     ## test one (read and load)
-    model = Net()
-    model_name = str(id_) + '.pt'
-    model.load_state_dict(torch.load(model_name))
-    model.to(device)
+    # model = Net()
+    # model_name = str(id_) + '.pt'
+    # model.load_state_dict(torch.load(model_name))
+    # model.to(device)
 
     ## normal one (send)
-    # model = Net().to(device)
+    model = Net().to(device)
 
 ##########################################################################
     # # toolbox test
@@ -702,8 +702,8 @@ def train_model():
         start_time = time.time() # time is accurate
 
         ## training only
-        # adjust_learning_rate(optimizer, epoch) # adv_train 1.0
-        # train(args, model, device, train_loader, optimizer, epoch)
+        adjust_learning_rate(optimizer, epoch) # adv_train 1.0
+        train(args, model, device, train_loader, optimizer, epoch)
         ##################################################################################
         # cascade_adv_train(args, model, device, train_loader, optimizer, epoch)
         ##################################################################################
@@ -722,7 +722,7 @@ def train_model():
         #############################################################################################
 
     ## save the final model
-    # torch.save(model.state_dict(), str(id_) + '.pt')
+    torch.save(model.state_dict(), str(id_) + '.pt')
 
     return model
 
