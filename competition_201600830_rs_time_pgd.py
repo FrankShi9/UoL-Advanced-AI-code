@@ -154,6 +154,8 @@ def pgd_whitebox(model, X, y, restarts=int(args.num_steps/2), epsilon=args.epsil
             eta = torch.clamp(X_pgd.data - X.data, -epsilon, epsilon)
             X_pgd = Variable(X.data + eta, requires_grad=True)
             X_pgd = Variable(torch.clamp(X_pgd, 0, 1.0), requires_grad=True)
+
+            # time update
             time_now = time.time()
             timecost_now = float(time_now - start_time)
 

@@ -88,7 +88,7 @@ class Net(nn.Module):
 ##############################################################################
 #############    end of "don't change the below code"   ######################
 ##############################################################################
-def pgd_whitebox(model, X, y, epsilon=0.031, num_steps=20, step_size=0.03):
+def pgd_whitebox(model, X, y, epsilon=0.1099, num_steps=20, step_size=0.011):
     out = model(X)
     # err = (out.data.max(1)[1] != y.data).float().sum()
     X_pgd = Variable(X.data, requires_grad=True)
@@ -342,8 +342,8 @@ def train_model():
     ## Note: below is the place you need to edit to implement your own training algorithm
     ##       You can also edit the functions such as train(...). 
     ################################################################################################
-    optimizer = optim.SGD(model.parameters(), lr=args.lr)
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
+    # optimizer = optim.SGD(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
     for epoch in range(1, args.epochs + 1):
         start_time = time.time()
 
@@ -364,7 +364,7 @@ def train_model():
     ################################################################################################
 
     # save the model
-    # torch.save(model.state_dict(), str(id_) + '.pt')
+    torch.save(model.state_dict(), str(id_) + '.pt')
     return model
 
 
