@@ -268,13 +268,6 @@ def train(args, scheduler, model, device, train_loader, optimizer, epoch):
 #######################################################################################################################
 
 #######################################################################################################################
-# advanced adv train 1: cascade adversarial method
-# which can produce adversarial images in every mini-batch. Namely, at each batch, it performs a
-# separate adversarial training by putting the adversarial images (produced in that batch) into
-# the training dataset
-#######################################################################################################################
-
-#######################################################################################################################
 # advanced adv train 2: ensemble adversarial training
 # which augments training data with perturbations transferred       # from other models.
 #######################################################################################################################

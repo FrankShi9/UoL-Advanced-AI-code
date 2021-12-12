@@ -32,7 +32,7 @@ parser.add_argument('--batch-size', type=int, default=128, metavar='N',
 parser.add_argument('--test-batch-size', type=int, default=128, metavar='N',
                     help='input batch size for testing (default: 128)')
 
-parser.add_argument('--epochs', type=int, default=10, metavar='N', # 1 for test, 10 for train
+parser.add_argument('--epochs', type=int, default=30, metavar='N', # 1 for test, 10 for train
                     help='number of epochs to train')
 # parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
 #                     help='learning rate')
@@ -50,7 +50,7 @@ parser.add_argument('--epsilon', default=0.1099, # change from 0.031 to 0.1099 1
                     help='perturbation')
 parser.add_argument('--num-steps', default=20,
                     help='perturb number of steps, FGSM: 1, PGD-20: 20') # change from 1 to 20 3/12/2021 -> to 50 -> 100 -> 40
-parser.add_argument('--step-size', default=0.011, # change from 0.031 to 0.1099 1/12/2021 -> from 0.1099 to 0.005495 -> from 0.005495 to 0.011 on 3/12/2021
+parser.add_argument('--step-size', default=0.05, # change from 0.031 to 0.1099 1/12/2021 -> 0.005495 -> 0.011 3/12/2021 -> 0.05 on 12/12/2021
                     help='perturb step size, FGSM: 0.1099, PGD-20: 0.005495') # change from 0.1099 to 0.005495 3/12/2021
 
 args = parser.parse_args(args=[])
@@ -125,7 +125,29 @@ def pgd_whitebox(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, st
 
     return X_pgd
 
+def pgd_whitebox60(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, step_size=args.step_size):
+    out = model(X)
 
+    X_pgd = Variable(X.data, requires_grad=True)
+    if args.random:
+        random_noise = torch.FloatTensor(*X_pgd.shape).uniform_(-epsilon, epsilon).to(device)
+        X_pgd = Variable(X_pgd.data + random_noise, requires_grad=True)
+
+    for _ in range(60):
+        opt = optim.SGD([X_pgd], lr=1e-3)
+        opt.zero_grad()
+
+        with torch.enable_grad():
+            loss = nn.CrossEntropyLoss()(model(X_pgd), y)
+        loss.backward()
+        eta = step_size * X_pgd.grad.data.sign()
+        X_pgd = Variable(X_pgd.data + eta, requires_grad=True)
+        eta = torch.clamp(X_pgd.data - X.data, -epsilon, epsilon)
+        X_pgd = Variable(X.data + eta, requires_grad=True)
+        X_pgd = Variable(torch.clamp(X_pgd, 0, 1.0), requires_grad=True)
+
+
+    return X_pgd
 
 # natural attack: Rotation and Translation # No for now
 
@@ -140,8 +162,8 @@ def adv_attack(model, X, y, device):
     ## Note: below is the place you need to edit to implement your own attack algorithm
     ####################################################################
 
-    X_adv = pgd_whitebox(model, X, y)
-
+    X_adv = pgd_whitebox(model, X, y)   # adv train only
+    # X_adv = pgd_whitebox60(model, X, y) # attack only
     # wrap up
     X_adv = Variable(X_adv.data)
 #####################################################################
@@ -260,7 +282,7 @@ def train_model():
 
 
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0002)  # adv train 0.1
-    optimizer = optim.SGD(model.parameters(), lr=0.05, momentum=0.9, weight_decay=0.0005)  # adv train 0.5
+    optimizer = optim.SGD(model.parameters(), lr=0.03, momentum=0.9, weight_decay=0.0005)  # adv train 0.5
 
 #################################################################################################################
 
@@ -337,10 +359,10 @@ def p_distance(model, train_loader, device):
 'Comment out the following command when you do not want to re-train the model'
 'In that case, it will load a pre-trained model you saved in train_model()'
 
-# model = train_model()
+model = train_model()
 
 'Call adv_attack() method on a pre-trained model'
 'the robustness of the model is evaluated against the infinite-norm distance measure'
 '!!! important: MAKE SURE the infinite-norm distance (epsilon p) less than 0.11 !!!'
-# p_distance(model, train_loader, device)
+p_distance(model, train_loader, device)
 

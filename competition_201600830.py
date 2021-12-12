@@ -322,7 +322,7 @@ def adv_attack(model, X, y, device):
 
 
     ## method combo
-    X_adv = pgd_whitebox(model, X, y)
+    # X_adv = pgd_whitebox(model, X, y)
     # X_adv = fgsm_attack(X, args.epsilon)
     # X_adv = linPGDAttack(X, y, model, LinPGDAttack(model))
 
@@ -608,7 +608,7 @@ def train_model():
     # attack = fgsm.LinfFastGradientAttack()
     attack = df.LinfDeepFoolAttack()
     # attack = pgd.LinfProjectedGradientDescentAttack()
-    # # attack = cw.L2CarliniWagnerAttack() # cannot run since take too long
+    ## attack = cw.L2CarliniWagnerAttack() # cannot run since take too long
     # # attack = ead.EADAttack() # cannot run since take too long
     # # attack = bb.LinfinityBrendelBethgeAttack() # assertion error
     # # attack = new.NewtonFoolAttack()

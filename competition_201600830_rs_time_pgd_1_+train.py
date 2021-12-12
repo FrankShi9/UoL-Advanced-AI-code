@@ -122,7 +122,7 @@ class Net(nn.Module):
 
 
 
-def pgd_whitebox(model, X, y, restarts=3, epsilon=args.epsilon, num_steps=args.num_steps, step_size=args.step_size):
+def pgd_whitebox(model, X, y, restarts=10, epsilon=args.epsilon, num_steps=args.num_steps, step_size=args.step_size):
     start_time = time.time()
     out = model(X)
 
@@ -168,6 +168,29 @@ def pgd_whitebox(model, X, y, restarts=3, epsilon=args.epsilon, num_steps=args.n
     return X_pgd
 
 
+def pgd_whitebox60(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, step_size=args.step_size):
+    out = model(X)
+
+    X_pgd = Variable(X.data, requires_grad=True)
+    if args.random:
+        random_noise = torch.FloatTensor(*X_pgd.shape).uniform_(-epsilon, epsilon).to(device)
+        X_pgd = Variable(X_pgd.data + random_noise, requires_grad=True)
+
+    for _ in range(60):
+        opt = optim.SGD([X_pgd], lr=1e-3)
+        opt.zero_grad()
+
+        with torch.enable_grad():
+            loss = nn.CrossEntropyLoss()(model(X_pgd), y)
+        loss.backward()
+        eta = step_size * X_pgd.grad.data.sign()
+        X_pgd = Variable(X_pgd.data + eta, requires_grad=True)
+        eta = torch.clamp(X_pgd.data - X.data, -epsilon, epsilon)
+        X_pgd = Variable(X.data + eta, requires_grad=True)
+        X_pgd = Variable(torch.clamp(X_pgd, 0, 1.0), requires_grad=True)
+
+
+    return X_pgd
 
 'generate adversarial data, you can define your adversarial method'
 
@@ -179,7 +202,8 @@ def adv_attack(model, X, y, device):
     ## Note: below is the place you need to edit to implement your own attack algorithm
     ####################################################################
 
-    X_adv = pgd_whitebox(model, X, y)
+    # X_adv = pgd_whitebox(model, X, y)
+    X_adv = pgd_whitebox60(model, X, y)
 
     #wrap up
     X_adv = Variable(X_adv.data)
@@ -309,11 +333,11 @@ def train_model():
 ##########################################################################
 
     ## toolbox test
-    # import foolbox as fb
-    # fmodel = fb.PyTorchModel(model, bounds=(0, 255))
+    import foolbox as fb
+    fmodel = fb.PyTorchModel(model, bounds=(0, 255))
     #
     # import foolbox.attacks.fast_gradient_method as fgsm
-    # import foolbox.attacks.deepfool as df
+    import foolbox.attacks.deepfool as df
     # import foolbox.attacks.carlini_wagner as cw
     # import foolbox.attacks.projected_gradient_descent as pgd
     # import foolbox.attacks.brendel_bethge as bb
@@ -327,7 +351,7 @@ def train_model():
 
 
     # attack = fgsm.LinfFastGradientAttack()
-    # attack = df.LinfDeepFoolAttack()
+    attack = df.LinfDeepFoolAttack()
     # attack = pgd.LinfProjectedGradientDescentAttack()
     # # attack = cw.L2CarliniWagnerAttack() # cannot run since take too long
     # # attack = ead.EADAttack() # cannot run since take too long
@@ -341,17 +365,16 @@ def train_model():
     #
     #
     # # epsilons = [0.001, 0.01, 0.03, 0.1]
-    # epsilons = [0.1099]
-    #
-    # for batch_idx, (data, target) in enumerate(test_loader):
-    #     data, target = data.to(device), target.to(device)
-    #     data = data.view(data.size(0), 28 * 28)
-    #     _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
-    #     # print('robustness: ', success)
-    #     print('effective attack: ', len([i for i in success[0] if i == True])/len(success[0]))
-    #     print(fb.utils.accuracy(fmodel, data, target))
-###########################################################################
-
+    epsilons = [0.1099]
+    acc = 0
+    for batch_idx, (data, target) in enumerate(test_loader):
+        data, target = data.to(device), target.to(device)
+        data = data.view(data.size(0), 28 * 28)
+        _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
+        # print('robustness: ', success)
+        acc += fb.utils.accuracy(fmodel, data, target)
+    ###########################################################################
+    print('avg acc', acc / len(test_loader))
 
     ################################################################################################
     ## Note: below is the place you need to edit to implement your own training algorithm
