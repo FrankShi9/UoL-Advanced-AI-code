@@ -74,7 +74,7 @@ parser.add_argument('--random', default=True,
 # FGSM: num-steps:1 step-size:0.1099   PGD-20: num-steps:20 step-size:0.005495
 parser.add_argument('--epsilon', default=0.1099, # change from 0.031 to 0.1099 1/12/2021
                     help='perturbation')
-parser.add_argument('--num-steps', default=100, #12/10 pgd100 train/test platform
+parser.add_argument('--num-steps', default=1, #12/10 pgd100 train/test platform
                     help='perturb number of steps, FGSM: 1, PGD-20: 20') # change from 1 to 20 3/12/2021 -> to 50 -> 100 -> 40
 parser.add_argument('--step-size', default=0.011, # change from 0.031 to 0.1099 1/12/2021 -> from 0.1099 to 0.005495 -> from 0.005495 to 0.011 on 3/12/2021
                     help='perturb step size, FGSM: 0.1099, PGD-20: 0.005495') # change from 0.1099 to 0.005495 3/12/2021
@@ -588,11 +588,11 @@ def train_model():
 
 ##########################################################################
     # # toolbox test
-    # import foolbox as fb
-    # fmodel = fb.PyTorchModel(model, bounds=(0, 255))
+    import foolbox as fb
+    fmodel = fb.PyTorchModel(model, bounds=(0, 255))
     #
     # import foolbox.attacks.fast_gradient_method as fgsm
-    # import foolbox.attacks.deepfool as df
+    import foolbox.attacks.deepfool as df
     # import foolbox.attacks.carlini_wagner as cw
     # import foolbox.attacks.projected_gradient_descent as pgd
     # import foolbox.attacks.brendel_bethge as bb
@@ -606,7 +606,7 @@ def train_model():
     #
     #
     # attack = fgsm.LinfFastGradientAttack()
-    # attack = df.LinfDeepFoolAttack()
+    attack = df.LinfDeepFoolAttack()
     # attack = pgd.LinfProjectedGradientDescentAttack()
     # # attack = cw.L2CarliniWagnerAttack() # cannot run since take too long
     # # attack = ead.EADAttack() # cannot run since take too long
@@ -620,17 +620,18 @@ def train_model():
     #
     #
     # # epsilons = [0.001, 0.01, 0.03, 0.1]
-    # epsilons = [0.1099]
-    #
-    # for batch_idx, (data, target) in enumerate(test_loader):
-    #     data, target = data.to(device), target.to(device)
-    #     data = data.view(data.size(0), 28 * 28)
-    #     _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
-    #     # print('robustness: ', success)
-    #     print('effective attack: ', len([i for i in success[0] if i == True])/len(success[0]))
-    #     print(fb.utils.accuracy(fmodel, data, target))
+    epsilons = [0.1099]
+    acc = 0
+    for batch_idx, (data, target) in enumerate(test_loader):
+        data, target = data.to(device), target.to(device)
+        data = data.view(data.size(0), 28 * 28)
+        _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
+        # print('robustness: ', success)
+        # print('effective attack: ', len([i for i in success[0] if i == True])/len(success[0]))
+        # print(fb.utils.accuracy(fmodel, data, target))
+        acc += fb.utils.accuracy(fmodel, data, target)
 ###########################################################################
-
+    print('avg acc', acc/len(test_loader))
 
     ################################################################################################
     ## Note: below is the place you need to edit to implement your own training algorithm
@@ -709,7 +710,7 @@ def train_model():
 
         # get trnloss and testloss
         trnloss, trnacc = eval_test(model, device, train_loader)
-        advloss, advacc = eval_adv_test(model, device, train_loader)
+        advloss, advacc = eval_adv_test(model, device, test_loader)
 
         # print trnloss and testloss
         print('Epoch ' + str(epoch) + ': ' + str(int(time.time() - start_time)) + 's', end=', ')
