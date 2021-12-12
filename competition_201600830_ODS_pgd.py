@@ -74,10 +74,15 @@ parser.add_argument('--random', default=True,
 # FGSM: num-steps:1 step-size:0.1099   PGD-20: num-steps:20 step-size:0.005495
 parser.add_argument('--epsilon', default=0.1099, # change from 0.031 to 0.1099 1/12/2021
                     help='perturbation')
-parser.add_argument('--num-steps', default=100, #12/10 pgd100 train/test platform
+parser.add_argument('--num-steps', default=100,
                     help='perturb number of steps, FGSM: 1, PGD-20: 20') # change from 1 to 20 3/12/2021 -> to 50 -> 100 -> 40
 parser.add_argument('--step-size', default=0.011, # change from 0.031 to 0.1099 1/12/2021 -> from 0.1099 to 0.005495 -> from 0.005495 to 0.011 on 3/12/2021
                     help='perturb step size, FGSM: 0.1099, PGD-20: 0.005495') # change from 0.1099 to 0.005495 3/12/2021
+#ODS only
+parser.add_argument('--ODI-num-steps', default=2, type=int,
+                    help='ODI perturb number of steps')
+parser.add_argument('--ODI-step-size', default=8/255, type=float,
+                    help='ODI perturb step size')
 
 args = parser.parse_args(args=[])
 
@@ -127,173 +132,53 @@ class Net(nn.Module):
 ######################################################################
 
 
-## 2021/10/19 version: FGSM_Attack
-def fgsm_attack(X, epsilon):
-    X = Variable(X.data, requires_grad=True)
-    sign_grad = X.sign()
-    X_adv = X
-    X_adv = Variable(X_adv + (epsilon * sign_grad), requires_grad=True)
-    X_adv = torch.clamp(X_adv, 0, 1)
-    return X_adv
 
-
-# epsilon = 0.09
-alpha = 0.00784
-## 2021/10/9 version: LinfPGD attack
-class LinPGDAttack(object):
-    def __init__(self, model):
-        self.model = model
-
-    def perturb(self, x_natural, y):  # **
-        x = x_natural.detach()
-        x += torch.zeros_like(x).uniform_(-args.epsilon, args.epsilon)
-        for i in range(7):
-            x.requires_grad = True
-            with torch.enable_grad():
-                logits = self.model(x)
-                loss = F.cross_entropy(logits, y)
-            grad = torch.autograd.grad(loss, [x])[0]
-            x = x.detach() + alpha * torch.sign(grad.detach())
-            x = torch.min(torch.max(x, x_natural - args.epsilon), x_natural + args.epsilon)
-            x = torch.clamp(x, 0, 1)
-        return x
-
-
-def linPGDAttack(x, y, model, adversary):
-    adv = adversary.perturb(x, y)
-    return adv
-
-
-def pgd_whitebox(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, step_size=args.step_size):
+def pgd_whitebox(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, step_size=args.step_size, ODI_num_steps=args.ODI_num_steps,
+                  ODI_step_size=args.step_size):
     out = model(X)
-    # err = (out.data.max(1)[1] != y.data).float().sum()
+
     X_pgd = Variable(X.data, requires_grad=True)
+    randVector = torch.FloatTensor(*model(X_pgd).shape).uniform_(-1., 1.).to(device)
+
     if args.random:
         random_noise = torch.FloatTensor(*X_pgd.shape).uniform_(-epsilon, epsilon).to(device)
         X_pgd = Variable(X_pgd.data + random_noise, requires_grad=True)
 
-    for _ in range(num_steps):
+    for i in range(ODI_num_steps + num_steps):
         opt = optim.SGD([X_pgd], lr=1e-3)
         opt.zero_grad()
 
+
         with torch.enable_grad():
-            loss = nn.CrossEntropyLoss()(model(X_pgd), y)
+            if i < ODI_num_steps:
+                loss = (model(X_pgd) * randVector).sum()
+            # elif args.lossFunc == 'xent':
+            #     loss = nn.CrossEntropyLoss()(model(X_pgd), y)
+            else:
+                loss = margin_loss(model(X_pgd), y)
         loss.backward()
-        eta = step_size * X_pgd.grad.data.sign()
+
+        if i < ODI_num_steps:
+            eta = ODI_step_size * X_pgd.grad.data.sign()
+        else:
+            eta = step_size * X_pgd.grad.data.sign()
+
         X_pgd = Variable(X_pgd.data + eta, requires_grad=True)
         eta = torch.clamp(X_pgd.data - X.data, -epsilon, epsilon)
         X_pgd = Variable(X.data + eta, requires_grad=True)
         X_pgd = Variable(torch.clamp(X_pgd, 0, 1.0), requires_grad=True)
-    # err_pgd = (model(X_pgd).data.max(1)[1] != y.data).sum()       # return err, err_pgd
+
     return X_pgd
 
+# ODS
+def margin_loss(logits,y):
 
-# CW-L2 Attack
-# Based on the paper, i.e. not exact same version of the code on https://github.com/carlini/nn_robust_attacks
-# (1) Binary search method for c, (2) Optimization on tanh space, (3) Choosing method best l2 adversaries is NOT IN THIS CODE.
-def cw_l2_attack(model, X, y, targeted=False, c=1e-4, kappa=0, max_iter=20, learning_rate=0.01, epsilon=args.epsilon):
-    images = X.to(device)
-    labels = y.to(device)
+    logit_org = logits.gather(1,y.view(-1,1))
+    logit_target = logits.gather(1,(logits - torch.eye(10)[y].to("cpu") * 9999).argmax(1, keepdim=True))
+    loss = -logit_org + logit_target
+    loss = torch.sum(loss)
+    return loss
 
-    # Define f-function
-    def f(x):
-
-        outputs = model(x)
-        one_hot_labels = torch.eye(len(outputs[0]))[labels].to(device)
-
-        i, _ = torch.max((1 - one_hot_labels) * outputs, dim=1)
-        j = torch.masked_select(outputs, one_hot_labels.byte())
-
-        # If targeted, optimize for making the other class most likely
-        if targeted:
-            return torch.clamp(i - j, min=-kappa)
-
-        # If untargeted, optimize for making the other class most likely
-        else:
-            return torch.clamp(j - i, min=-kappa)
-
-    w = torch.zeros_like(images, requires_grad=True).to(device)
-
-    optimizer = optim.Adam([w], lr=learning_rate)
-
-    prev = 1e10
-
-    for step in range(max_iter):
-
-        a = 1 / 2 * (nn.Tanh()(w) + 1)
-
-        loss1 = nn.MSELoss(reduction='sum')(a, images)
-        loss2 = torch.sum(c * f(a))
-
-        cost = loss1 + loss2
-        cost = Variable(cost.data, requires_grad=True)
-        optimizer.zero_grad()
-        cost.backward()
-        optimizer.step()
-
-        # Early Stop when loss does not converge.
-        if step % (max_iter // 10) == 0:
-            if cost > prev:
-                print('Attack Stopped due to CONVERGENCE....')
-                return a
-            prev = cost
-
-        print('- Learning Progress : %2.2f %%        ' % ((step + 1) / max_iter * 100), end='\r')
-
-    attack_images = 1 / 2 * (nn.Tanh()(w) + 1)
-    attack_images = Variable(torch.clamp(attack_images, -epsilon, epsilon), requires_grad=True)
-
-    return attack_images
-
-
-# C&W attack: sub-optimal for single un-composite attack
-def calc_cw(model, X, epsilon=args.epsilon):
-    noise = torch.FloatTensor(*X.shape).uniform_(-0.1, 0.1).to(device)
-    c = 1e+01
-    X_adv = Variable(X.data + noise)
-    X_cw = X_adv
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-
-        # change here use marginal loss instead
-        X_h = model(X_adv)
-        loss = torch.norm(noise, float('inf')) + c * F.cross_entropy(X_h, target)
-        optimizer = optim.Adam([noise], lr=0.0001)
-
-        optimizer.zero_grad()
-
-        loss.backward()
-
-        optimizer.step()
-
-        eta = torch.clamp(X_adv.data - X.data, -epsilon, epsilon)
-        X_cw = Variable(X.data + eta, requires_grad=True)
-        X_cw = Variable(torch.clamp(X_cw, 0, 1.0), requires_grad=True)
-
-    return X_cw
-
-
-# GT attack: sub-optimal better than c&w for single un-composite attack
-def calc_gt(model, X, X_ac, epsilon=args.epsilon):
-    eps_min = 0
-    eps_max = epsilon
-    t = 1e-4
-    x_b = X_ac
-    eps = 0.
-    x_h = None
-    while eps_max - eps_min > t:
-        eps = (eps_max + eps_min) / 2
-        # !!Invoke Reluplex to test whether ∃x!!
-        if x_h is not None:
-            eps_max = torch.norm(x_h - X, float('inf'))
-            x_b = x_h
-        else:
-            eps_min = eps
-
-    return x_b
-
-
-# natural attack: Rotation and Translation # No for now
 
 
 'generate adversarial data, you can define your adversarial method'
@@ -397,137 +282,6 @@ def train(args, model, device, train_loader, optimizer, epoch):
 #     torch.save((Net.state_dict(), optimizer.state_dict()), path)
 # tune.report(loss=(loss / len(train_loader.dataset)), accuracy=correct / len(train_loader.dataset))
 #######################################################################################################################
-
-#######################################################################################################################
-# advanced adv train 1: cascade adversarial method
-# which can produce adversarial images in every mini-batch. Namely, at each batch, it performs a
-# separate adversarial training by putting the adversarial images (produced in that batch) into
-# the training dataset
-#######################################################################################################################
-
-#######################################################################################################################
-# advanced adv train 2: ensemble adversarial training
-# which augments training data with perturbations transferred       # from other models.
-#######################################################################################################################
-
-
-def cascade_adv_train(args, model, device, train_loader, optimizer, epoch):
-    model.train()
-    # correct = 0
-    ite = 0
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-        data = data.view(data.size(0), 28 * 28)
-        adjust_learning_rate_c(optimizer, ite)
-        adv_data = adv_attack(model, data, target, device=device)
-
-        optimizer.zero_grad()
-
-        loss = F.cross_entropy(model(adv_data), target)
-
-        loss.backward()
-
-        optimizer.step()
-
-        ite += args.batch_size
-
-        if ite > 8000:
-            # early stopping
-            return
-
-
-# ATLD train by Huang
-def atld_train(epoch, net):
-    # config for feature scatter
-    config_feature_scatter = {
-        'train': True,
-        'epsilon': 8.0 / 255 * 2,
-        'num_steps': 1,
-        'step_size': 8.0 / 255 * 2,
-        'random_start': True,
-        'ls_factor': 0.5,
-    }
-    basic_net = WideResNet(depth=28,
-                           num_classes=10,
-                           widen_factor=10)
-    basic_net = basic_net.to(device)
-    discriminator = Discriminator_2(depth=28, num_classes=1, widen_factor=5).to(device)
-    D_optimizer = optim.SGD(discriminator.parameters(),
-                            lr=1e-3,
-                            momentum=0.9,
-                            weight_decay=0.0001)
-
-    net_org = Attack_FeaScatter(basic_net, config_feature_scatter, discriminator, D_optimizer)
-    optimizer = optim.SGD(net.parameters(),
-                          lr=args.lr,
-                          momentum=0.9,
-                          weight_decay=0.0001)
-    print('\nEpoch: %d' % epoch)
-    net.train()
-
-    train_loss = 0
-    correct = 0
-    total = 0
-
-    # update learning rate
-    if epoch < 100:
-        lr = args.lr
-    elif epoch < 150:
-        lr = args.lr * 0.1
-    else:
-        lr = args.lr * 0.1 * 0.1
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-
-    def get_acc(outputs, targets):
-        _, predicted = outputs.max(1)
-        total = targets.size(0)
-        targets = targets.long()
-        correct = predicted.eq(targets).sum().item()
-        acc = 1.0 * correct / total
-        return acc
-
-    adversarial_criterion = nn.BCELoss()
-    iterator = tqdm(train_loader, ncols=0, leave=False)
-    for batch_idx, (inputs, targets) in enumerate(iterator):
-        start_time = time.time()
-        inputs, targets = inputs.to(device), targets.to(device)
-
-        adv_acc = 0
-
-        optimizer.zero_grad()
-
-        # forward
-        outputs, loss_fs, gan_loss, scale = net_org(inputs.detach(), targets)
-
-        optimizer.zero_grad()
-        loss = loss_fs.mean()
-        print('loss_fs:', loss_fs.item())
-        # print('gan_loss:', gan_loss.item())
-        loss = (loss + gan_loss * scale / 2)
-        loss.backward(retain_graph=True)
-        for name, parms in net.named_parameters():
-            if name == 'module.final_layer.weight':
-                max = torch.max(parms.grad)
-                min = torch.min(parms.grad)
-                diff = (max - min) * 0.3
-
-                max_threshold = max - diff
-                min_threshold = min + diff
-
-                parms.grad = parms.grad.clamp(min_threshold, max_threshold)
-        optimizer.step()
-
-        train_loss = loss.item()
-
-        duration = time.time() - start_time
-        if batch_idx % args.log_step == 0:
-            if adv_acc == 0:
-                adv_acc = get_acc(outputs, targets)
-            iterator.set_description(str(adv_acc))
-
-            nat_outputs, _ = net_org(inputs, targets, attack=False)
-            nat_acc = get_acc(nat_outputs, targets)
 
 
 'predict function'

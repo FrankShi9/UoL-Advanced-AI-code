@@ -7,16 +7,11 @@
 ###
 ### The score is based on both algorithms.
 ######################################################################
-import copy
-import os
 
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from art.estimators.classification import PyTorchClassifier
-from matplotlib import pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 import torchvision
@@ -24,27 +19,6 @@ from torchvision import transforms
 from torch.autograd import Variable
 import argparse
 import time
-
-# adv_train 2: use lib mth to test robustness
-# import advertorch
-# from art.defences.trainer import adversarial_trainer
-
-# Ray-tune hyper-para tuning
-# from ray import tune
-# from ray.tune import CLIReporter
-# from ray.tune.shcedulers import ASHAScheduler
-# from functools import partial
-
-
-# ATLD Train
-from attack_methods_new_cifar10 import *
-from tqdm import tqdm
-from WideResnet import *
-from dis_atld import *
-
-#auto attack test
-from art.attacks.evasion import AutoAttack
-
 
 # input id
 id_ = 201600830
@@ -92,11 +66,11 @@ kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 ######################################################################
 ################    don't change the below code
 ######################################################################
-train_set = torchvision.datasets.FashionMNIST(root='../data', train=True, download=True,
+train_set = torchvision.datasets.FashionMNIST(root='data', train=True, download=True,
                                               transform=transforms.Compose([transforms.ToTensor()]))
 train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
 
-test_set = torchvision.datasets.FashionMNIST(root='../data', train=False, download=True,
+test_set = torchvision.datasets.FashionMNIST(root='data', train=False, download=True,
                                              transform=transforms.Compose([transforms.ToTensor()]))
 test_loader = DataLoader(test_set, batch_size=args.batch_size, shuffle=True)
 
@@ -162,57 +136,15 @@ def pgd_whitebox(model, X, y, epsilon=args.epsilon, num_steps=args.num_steps, st
 def adv_attack(model, X, y, device):
     X_adv = Variable(X.data)
 
-    # for ART auto only
-    # X = Variable(X.float(), requires_grad=True)
-    # y = Variable(y.float(), requires_grad=True)
-
-    #####################################################################
+#####################################################################
     ## Note: below is the place you need to edit to implement your own attack algorithm
     ####################################################################
 
-    ## random noise mth
-    # random_noise = torch.FloatTensor(*X_adv.shape).uniform_(-0.1, 0.1).to(device)
-    # X_adv = Variable(X_adv.data + random_noise)
-
-
-    # CW
-    # noise = cw_l2_attack(model, X, y)
-    # X_adv = Variable(X_adv.data + noise)
-
-
-
-    ## method combo
     X_adv = pgd_whitebox(model, X, y)
-    # X_adv = fgsm_attack(X, args.epsilon)
-    # X_adv = linPGDAttack(X, y, model, LinPGDAttack(model))
 
-    ## untested below
-    # X_adv = calc_cw(model, X)
-
-    ## AutoAttack by ART ##bug!!##
-    # optimizer = optim.SGD(model.parameters(), lr=args.lr)
-    # criterion = nn.CrossEntropyLoss()
-    # classifier = PyTorchClassifier(
-    #     model=model,
-    #     clip_values=(0, 255),
-    #     loss=criterion,
-    #     optimizer=optimizer,
-    #     input_shape=(1, 784),
-    #     nb_classes=10,
-    # )
-    # auto = AutoAttack(estimator=classifier, eps=0.1099, batch_size=128)
-    # X_adv = torch.tensor(auto.generate(X.view(X.size(0), 28 * 28).detach().numpy(), y.detach().numpy()))
-
-    # # goes with the upper 4 ones
+    # wrap up
     X_adv = Variable(X_adv.data)
-
-    # tas auto
-    # import torchattacks
-    # cw = torchattacks.CW(model)
-    # auto = torchattacks.AutoAttack(model, eps=args.epsilon)
-    # X_adv = auto(X, y)
-    # X_adv = Variable(X_adv.data)
-    #####################################################################
+#####################################################################
     ## end of attack method
     ####################################################################
     return X_adv
@@ -246,39 +178,11 @@ def train(args, scheduler, model, device, train_loader, optimizer, epoch):
         loss = F.cross_entropy(model(adv_data),
                                target)  # adv train 0 feed adv_x in net training to shape a resilient net
 
-        #######################################################################################################################
-        ## ray tune prep
-        # output = model(data)
-        # pred = output.max(1, keepdim=True)[1]
-        # correct += pred.eq(target.view_as(pred)).sum().item()
-        #######################################################################################################################
-
         # get gradients and update
         loss.backward()
         optimizer.step()
 
         scheduler.step(epoch + batch_idx / iters)
-
-#######################################################################################################################
-# ray tune
-# with tune.checkpoint_dir(epoch) as checkpoint_dir:
-#     path = os.path.join(checkpoint_dir, "checkpoint")
-#     torch.save((Net.state_dict(), optimizer.state_dict()), path)
-# tune.report(loss=(loss / len(train_loader.dataset)), accuracy=correct / len(train_loader.dataset))
-#######################################################################################################################
-
-#######################################################################################################################
-# advanced adv train 1: cascade adversarial method
-# which can produce adversarial images in every mini-batch. Namely, at each batch, it performs a
-# separate adversarial training by putting the adversarial images (produced in that batch) into
-# the training dataset
-#######################################################################################################################
-
-#######################################################################################################################
-# advanced adv train 2: ensemble adversarial training
-# which augments training data with perturbations transferred       # from other models.
-#######################################################################################################################
-
 
 'predict function'
 
@@ -353,82 +257,7 @@ def train_model():
             T_mult=mult
         )
 
-##########################################################################
-    # # toolbox test
-    # import foolbox as fb
-    # fmodel = fb.PyTorchModel(model, bounds=(0, 255))
-    #
-    # import foolbox.attacks.fast_gradient_method as fgsm
-    # import foolbox.attacks.deepfool as df
-    # import foolbox.attacks.carlini_wagner as cw
-    # import foolbox.attacks.projected_gradient_descent as pgd
-    # import foolbox.attacks.brendel_bethge as bb
-    # import foolbox.attacks.newtonfool as new
-    # import foolbox.attacks.ead as ead
-    # import foolbox.attacks.ddn as ddn
-    # import foolbox.attacks.gradient_descent_base as gd
-    # import foolbox.attacks.virtual_adversarial_attack as va
-    # import foolbox.attacks.spatial_attack as sa
-    # import foolbox.attacks.saltandpepper as sp
-    #
-    #
-    # attack = fgsm.LinfFastGradientAttack()
-    # attack = df.LinfDeepFoolAttack()
-    # attack = pgd.LinfProjectedGradientDescentAttack()
-    # # attack = cw.L2CarliniWagnerAttack() # cannot run since take too long
-    # # attack = ead.EADAttack() # cannot run since take too long
-    # # attack = bb.LinfinityBrendelBethgeAttack() # assertion error
-    # # attack = new.NewtonFoolAttack()
-    # # attack = ddn.DDNAttack()
-    # # attack = gd.LinfBaseGradientDescent(rel_stepsize=20, steps=20, random_start=True)
-    # # attack = va.VirtualAdversarialAttack(steps=20)
-    # # attack = sa.SpatialAttack() #only implemented for inputs with two spatial dimensions (and one channel and one batch dimension)
-    # # attack = sp.SaltAndPepperNoiseAttack()
-    #
-    #
-    # # epsilons = [0.001, 0.01, 0.03, 0.1]
-    # epsilons = [0.1099]
-    #
-    # for batch_idx, (data, target) in enumerate(test_loader):
-    #     data, target = data.to(device), target.to(device)
-    #     data = data.view(data.size(0), 28 * 28)
-    #     _, advs, success = attack(fmodel, data, target, epsilons=epsilons)
-    #     # print('robustness: ', success)
-    #     print('effective attack: ', len([i for i in success[0] if i == True])/len(success[0]))
-    #     print(fb.utils.accuracy(fmodel, data, target))
-###########################################################################
 
-
-    ################################################################################################
-    ## Note: below is the place you need to edit to implement your own training algorithm
-    ##       You can also edit the functions such as train(...).
-    ################################################################################################
-
-    #  atld only
-    # config_feature_scatter = {
-    #     'train': True,
-    #     'epsilon': 8.0 / 255 * 2,
-    #     'num_steps': 1,
-    #     'step_size': 8.0 / 255 * 2,
-    #     'random_start': True,
-    #     'ls_factor': 0.5,
-    # }
-    # basic_net = WideResNet(depth=28,
-    #                        num_classes=10,
-    #                        widen_factor=10)
-    # basic_net = basic_net.to(device)
-    # discriminator = Discriminator_2(depth=28, num_classes=1, widen_factor=5).to(device)
-    # D_optimizer = optim.SGD(discriminator.parameters(),
-    #                         lr=1e-3,
-    #                         momentum=0.9,
-    #                         weight_decay=0.0001)
-    #
-    # net_org = Attack_FeaScatter(basic_net, config_feature_scatter, discriminator, D_optimizer)
-    # # net_org = torch.nn.DataParallel(net_org)
-    # net = net_org.basic_net
-    # discriminator = net_org.discriminator
-    # for epoch in range(1, 3):
-    #     atld_train(epoch, net)
 
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.0002)  # adv train 0.1
     optimizer = optim.SGD(model.parameters(), lr=0.05, momentum=0.9, weight_decay=0.0005)  # adv train 0.5
@@ -505,54 +334,13 @@ def p_distance(model, train_loader, device):
     print('epsilon p: ', max(p))
 
 
-# Ray tune last stage
-# Ray tune last stage
-################################################################################################
-## Note: below is for testing/debugging purpose, please comment them out in the submission file
-################################################################################################
-
-# Ray hyper-para tuning works only in linux   TRY ON SERVER
-# num_samples=10
-# max_num_epochs=10
-# config = {
-#     "l1": tune.sample_from(lambda _: 2**np.random.randint(2, 9)),
-#     "l2": tune.sample_from(lambda _: 2**np.random.randint(2, 9)),
-#     "lr": tune.loguniform(1e-4, 1e-1),
-#     "batch_size": tune.choice([2, 4, 8, 16])
-# }
-# scheduler = ASHAScheduler(
-#         metric="loss",
-#         mode="min",
-#         max_t=max_num_epochs,
-#         grace_period=1,
-#         reduction_factor=2)
-# reporter = CLIReporter(
-# # parameter_columns=["l1", "l2", "lr", "batch_size"],
-# metric_columns=["loss", "accuracy", "training_iteration"])
-# result = tune.run(
-#         partial(train, train_loader),
-#         resources_per_trial={"cpu": 2},
-#         config=config,
-#         num_samples=num_samples,
-#         scheduler=scheduler,
-#         progress_reporter=reporter)
-#
-# best_trial = result.get_best_trial("loss", "min", "last")
-# print("Best trial config: {}".format(best_trial.config))
-# print("Best trial final validation loss: {}".format(
-#         best_trial.last_result["loss"]))
-# print("Best trial final validation accuracy: {}".format(
-#         best_trial.last_result["accuracy"]))
-#
-# best_trained_model = Net(best_trial.config["l1"], best_trial.config["l2"])
-
 'Comment out the following command when you do not want to re-train the model'
 'In that case, it will load a pre-trained model you saved in train_model()'
 
-model = train_model()
+# model = train_model()
 
 'Call adv_attack() method on a pre-trained model'
 'the robustness of the model is evaluated against the infinite-norm distance measure'
 '!!! important: MAKE SURE the infinite-norm distance (epsilon p) less than 0.11 !!!'
-p_distance(model, train_loader, device)
+# p_distance(model, train_loader, device)
 
