@@ -1,6 +1,9 @@
 # University of Liverpool COMP219
-## Adversarial attack and defense
 
+# Project Title
+## Adversarial attack and defense assignment
+
+# Description
 ## Target Net: 5 layer Fully connected network
 
 ## Dataset: FashionMNIST
