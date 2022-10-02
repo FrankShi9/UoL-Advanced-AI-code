@@ -1,4 +1,4 @@
-# University of Liverpool COMP219
+# University of Liverpool Advanced AI
 
 ## Project Title
 ### Adversarial attack and defense assignment
